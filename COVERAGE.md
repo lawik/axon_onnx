@@ -7,22 +7,22 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 673 | 37.5% |
-| unsupported | 1120 | 62.5% |
-| known_bug | 0 | 0.0% |
+| passing | 674 | 37.6% |
+| unsupported | 1113 | 62.1% |
+| known_bug | 6 | 0.3% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 ## Round-trip coverage
 
-Of the 673 cases that import cleanly, how many also export back to
+Of the 674 cases that import cleanly, how many also export back to
 ONNX and re-import with matching predictions (the full bidirectional
 Nx/Axon ⇄ ONNX path).
 
 | Classification | Count | % of import-passing |
 |---|---|---|
 | passing | 95 | 14.1% |
-| unsupported | 578 | 85.9% |
+| unsupported | 579 | 85.9% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -32,8 +32,9 @@ Nx/Axon ⇄ ONNX path).
 
 **node** — 1653 cases
 
-- passing: 579
-- unsupported: 1074
+- passing: 580
+- unsupported: 1067
+- known_bug: 6
 
 **pytorch-converted** — 82 cases
 
@@ -97,7 +98,7 @@ A case using N distinct ops contributes to N rows.
 | ConstantOfShape | 72 | 0 | 72 | 0 | 0 | 0 |
 | Conv | 33 | 27 | 6 | 0 | 0 | 0 |
 | ConvInteger | 2 | 0 | 2 | 0 | 0 | 0 |
-| ConvTranspose | 14 | 4 | 10 | 0 | 0 | 0 |
+| ConvTranspose | 14 | 4 | 9 | 1 | 0 | 0 |
 | Cos | 8 | 2 | 6 | 0 | 0 | 0 |
 | Cosh | 2 | 2 | 0 | 0 | 0 | 0 |
 | CumSum | 9 | 0 | 9 | 0 | 0 | 0 |
@@ -180,8 +181,8 @@ A case using N distinct ops contributes to N rows.
 | Pad | 18 | 2 | 16 | 0 | 0 | 0 |
 | Pow | 17 | 15 | 2 | 0 | 0 | 0 |
 | QLinearConv | 1 | 0 | 1 | 0 | 0 | 0 |
-| QLinearMatMul | 8 | 4 | 4 | 0 | 0 | 0 |
-| QuantizeLinear | 16 | 5 | 11 | 0 | 0 | 0 |
+| QLinearMatMul | 8 | 4 | 0 | 4 | 0 | 0 |
+| QuantizeLinear | 16 | 6 | 9 | 1 | 0 | 0 |
 | RMSNormalization | 19 | 19 | 0 | 0 | 0 | 0 |
 | RNN | 4 | 0 | 4 | 0 | 0 | 0 |
 | RandomUniformLike | 3 | 0 | 3 | 0 | 0 | 0 |

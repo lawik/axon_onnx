@@ -92,17 +92,30 @@ defmodule OnnxTestHelper do
 
     {model, params} = AxonOnnx.import(model_path)
 
-    inputs = Axon.get_inputs(model)
+    # Map input_N.pb files to graph inputs in PROTO order, not Map.keys
+    # (alphabetical) order — otherwise any model whose input names aren't
+    # already alphabetical (Clip's [x, min, max], Trilu's [x, k], etc.)
+    # gets scrambled inputs. Same fix as AxonOnnx.Coverage.run_case/2.
+    init_names =
+      model_path
+      |> File.read!()
+      |> Onnx.ModelProto.decode!()
+      |> Map.fetch!(:graph)
+      |> then(fn g ->
+        proto_inputs = Enum.map(g.input, & &1.name)
+        init_set = MapSet.new(g.initializer, & &1.name)
+        Enum.reject(proto_inputs, &MapSet.member?(init_set, &1))
+      end)
 
     data_paths
     |> Enum.map(fn data_path ->
-      input_paths = Path.wildcard(Path.join([data_path, "input_*.pb"]))
-      output_paths = Path.wildcard(Path.join([data_path, "output_*.pb"]))
+      input_paths = Path.wildcard(Path.join([data_path, "input_*.pb"])) |> Enum.sort()
+      output_paths = Path.wildcard(Path.join([data_path, "output_*.pb"])) |> Enum.sort()
 
       inp_tensors =
         input_paths
         |> Enum.map(&pb_to_tensor/1)
-        |> Enum.zip(Map.keys(inputs))
+        |> Enum.zip(init_names)
         |> Map.new(fn {v, k} -> {k, v} end)
 
       out_tensors = Enum.map(output_paths, &pb_to_tensor/1)

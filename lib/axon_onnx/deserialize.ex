@@ -17,6 +17,7 @@ defmodule AxonOnnx.Deserialize do
   import AxonOnnx.Shared
 
   @opsets_key {__MODULE__, :opsets}
+  @input_types_key {__MODULE__, :input_types}
 
   def __load__(binary, opts \\ []) do
     binary
@@ -26,7 +27,9 @@ defmodule AxonOnnx.Deserialize do
 
   defp to_axon(%Model{graph: %Graph{} = graph, opset_import: opset_imports}, dimensions) do
     opsets = build_opsets(opset_imports)
-    previous = Process.put(@opsets_key, opsets)
+    input_types = build_input_types(graph)
+    previous_opsets = Process.put(@opsets_key, opsets)
+    previous_input_types = Process.put(@input_types_key, input_types)
 
     try do
       {graph, params} = graph_to_axon(graph, dimensions)
@@ -41,12 +44,13 @@ defmodule AxonOnnx.Deserialize do
           {Axon.container(List.to_tuple(graph)), params}
       end
     after
-      case previous do
-        nil -> Process.delete(@opsets_key)
-        prev -> Process.put(@opsets_key, prev)
-      end
+      restore_dict(@opsets_key, previous_opsets)
+      restore_dict(@input_types_key, previous_input_types)
     end
   end
+
+  defp restore_dict(key, nil), do: Process.delete(key)
+  defp restore_dict(key, prev), do: Process.put(key, prev)
 
   @doc """
   Returns the ONNX opset version in scope for the current deserialization
@@ -83,6 +87,36 @@ defmodule AxonOnnx.Deserialize do
     Enum.reduce(opset_imports, %{}, fn import_id, acc ->
       Map.put(acc, import_id.domain || "", import_id.version)
     end)
+  end
+
+  defp build_input_types(%Graph{input: inputs}) do
+    Enum.reduce(inputs, %{}, fn %Value{name: name, type: %Type{value: value}}, acc ->
+      case value do
+        {:tensor_type, %Placeholder{elem_type: elem_type}} when not is_nil(elem_type) ->
+          Map.put(acc, name, onnx_type_to_nx_type(elem_type))
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  @doc """
+  Looks up the ONNX-declared Nx dtype for a named graph input, or `nil` if
+  unknown. Available throughout the lifetime of `AxonOnnx.import/2`/`load/2`.
+
+  Axon 0.5's `Axon.input/2` only carries shape, not dtype, so callers that
+  need the declared dtype (e.g. to decide a quantisation output type from
+  `y_zero_point`'s declared int8/u16 elem_type) consult this side-channel
+  rather than relying on the runtime tensor — which they can't see at
+  graph-build time.
+  """
+  @spec input_type(String.t()) :: Nx.Type.t() | nil
+  def input_type(name) when is_binary(name) do
+    case Process.get(@input_types_key) do
+      nil -> nil
+      map -> Map.get(map, name)
+    end
   end
 
   def graph_to_axon(%Graph{node: nodes} = graph, dimensions) do
@@ -629,7 +663,10 @@ defmodule AxonOnnx.Deserialize do
     fun = fn inputs, _opts ->
       [init | rest] = Tuple.to_list(inputs)
       sum = Enum.reduce(rest, init, &Nx.add/2)
-      Nx.divide(sum, n)
+      # Use a float divisor — Nx.divide truncates on integer inputs, and
+      # ONNX Mean's type constraint is float-only but corpus-style models
+      # sometimes feed integer test data.
+      Nx.divide(sum, n * 1.0)
     end
 
     layer =
@@ -1515,7 +1552,7 @@ defmodule AxonOnnx.Deserialize do
     y_scale = input!(y_scale_n, axon, params, used_params)
     y_zp = input!(y_zp_n, axon, params, used_params)
 
-    target_type = quantize_target_type(y_zp)
+    target_type = quantize_target_type(y_zp_n, y_zp)
     {min_v, max_v} = quantize_range(target_type)
 
     fun = fn a, a_scale, a_zp, b, b_scale, b_zp, y_scale, y_zp, _opts ->
@@ -1639,7 +1676,7 @@ defmodule AxonOnnx.Deserialize do
     scale = input!(scale_name, axon, params, used_params)
     zp = if zp_name, do: input!(zp_name, axon, params, used_params), else: nil
 
-    target_type = quantize_target_type(zp)
+    target_type = quantize_target_type(zp_name, zp)
 
     {min_v, max_v} = quantize_range(target_type)
 
@@ -1725,10 +1762,10 @@ defmodule AxonOnnx.Deserialize do
        ) do
     # ScatterElements writes updates into data at positions derived by
     # combining the per-element indices with the surrounding coordinates of
-    # the indices tensor. The Nx primitives are `indexed_put` (reduction=none),
-    # `indexed_add` (reduction=add), and a manual scatter-accumulate for
-    # mul/min/max. We construct the per-element full (n, rank) coordinate
-    # matrix once and dispatch on the reduction attribute.
+    # the indices tensor. We support reduction in {none, add} via
+    # Nx.indexed_put / Nx.indexed_add. Reductions mul/min/max are not
+    # implemented and raise from do_scatter_elements/5 below — those cases
+    # stay :unsupported in the registry.
     options = options!(attrs)
     axis = options["axis"] || 0
     reduction = options["reduction"] || "none"
@@ -2311,7 +2348,17 @@ defmodule AxonOnnx.Deserialize do
          },
          {axon, params, used_params}
        ) do
+    # Unsqueeze's `axes` migrated from attribute to a second input at opset
+    # 13. Same canary check as Squeeze above: catch the malformed-attribute-
+    # on-modern-opset combo.
+    opset = opset_version()
     unsqueeze_options = options!(attrs)
+
+    if opset && opset >= 13 && maybe_axis == [] && !unsqueeze_options["axes"] do
+      raise ArgumentError,
+            "Unsqueeze declares opset #{opset} (≥ 13) but axes is missing " <>
+              "from both attributes and inputs."
+    end
 
     inp = input!(input, axon, params, used_params)
 
@@ -2533,9 +2580,23 @@ defmodule AxonOnnx.Deserialize do
          %Node{op_type: "Clip", attribute: attrs, input: [inp_name], output: [output_name]},
          {axon, params, used_params}
        ) do
+    # Clip's min/max migrated from attributes (pre-opset-11) to inputs at
+    # opset 11. The single-input form is the only form that's valid for
+    # pre-opset-11 AND for opset 11+ with both bounds omitted. We check the
+    # declared opset to surface invalid combinations: an opset ≥ 11 model
+    # that still carries min/max attributes is malformed (an exporter bug
+    # somewhere) and would silently lose those bounds otherwise. Pre-opset-11
+    # treats absent min/max as "no clip" via the dtype-finite fallbacks.
+    opset = opset_version()
     inp = input!(inp_name, axon, params, used_params)
 
     opts = options!(attrs)
+
+    if opset && opset >= 11 && (opts["min"] || opts["max"]) do
+      raise ArgumentError,
+            "Clip declares opset #{opset} (≥ 11) but supplies min/max as " <>
+              "attributes; opset 11+ requires them as inputs."
+    end
 
     min = opts["min"] || Nx.Constants.min_finite({:f, 32})
     max = opts["max"] || Nx.Constants.max_finite({:f, 32})
@@ -2664,8 +2725,19 @@ defmodule AxonOnnx.Deserialize do
          %Node{op_type: "Squeeze", attribute: attrs, input: [data], output: [output_name]},
          {axon, params, used_params}
        ) do
+    # Squeeze's `axes` migrated from attribute to a second input at opset 13.
+    # The single-input form is only valid pre-opset-13, OR opset 13+ with
+    # axes omitted (squeeze all size-1 dims). Catch malformed models that
+    # supply an `axes` attribute at opset ≥ 13.
+    opset = opset_version()
     inp = input!(data, axon, params, used_params)
     squeeze_options = options!(attrs)
+
+    if opset && opset >= 13 && squeeze_options["axes"] do
+      raise ArgumentError,
+            "Squeeze declares opset #{opset} (≥ 13) but supplies axes as " <>
+              "an attribute; opset 13+ requires axes as a second input."
+    end
 
     axes = squeeze_options["axes"]
 
@@ -2907,7 +2979,7 @@ defmodule AxonOnnx.Deserialize do
             |> then(fn {tensor, _key} -> tensor end)
           end
 
-          Axon.layer(fun, [inp], name: output_name, op_name: :random_uniform_like)
+          Axon.layer(fun, [inp], name: output_name, op_name: :random_normal_like)
 
         %Nx.Tensor{} = t ->
           shape = Nx.shape(t)
@@ -2995,6 +3067,10 @@ defmodule AxonOnnx.Deserialize do
 
           pad_layer = Axon.nx(inp, &Nx.pad(&1, value, config), op_name: :pad)
           Map.put(axon, output_name, pad_layer)
+
+        other ->
+          raise ArgumentError,
+                "Pad mode #{inspect(other)} is not yet supported (only constant is)"
       end
 
     {updated_axon, params, used_params}
@@ -3040,6 +3116,10 @@ defmodule AxonOnnx.Deserialize do
 
           pad_layer = Axon.nx(inp, &Nx.pad(&1, value, config), op_name: :pad)
           Map.put(axon, output_name, pad_layer)
+
+        other ->
+          raise ArgumentError,
+                "Pad mode #{inspect(other)} is not yet supported (only constant is)"
       end
 
     {updated_axon, params, used_params}
@@ -3260,14 +3340,16 @@ defmodule AxonOnnx.Deserialize do
         :same
 
       val when val == "SAME_LOWER" ->
-        # TODO: :(
-        # Enum.zip_with([Tuple.to_list(shape), Tuple.to_list(kernel_size), strides], fn [dim, k, s] ->
-        #   padding_size = max((dim - 1) * s + k - dim, 0)
-        #   hi = floor(padding_size / 2)
-        #   lo = ceil(padding_size / 2)
-        #   {lo, hi}
-        # end)
-        :same
+        # SAME_LOWER asymmetrically pads the LOWER (start) side when the
+        # padding amount is odd; Axon's `:same` is SAME_UPPER. Computing the
+        # explicit per-axis padding requires the input shape, which we don't
+        # have here, so we raise rather than silently fall back to
+        # SAME_UPPER (the prior behaviour produced wrong outputs without any
+        # signal). A future fix would plumb the input shape through and
+        # build the per-axis {lo, hi} tuple.
+        raise ArgumentError,
+              "auto_pad=SAME_LOWER is not yet supported; only SAME_UPPER " <>
+                "is correctly lowered. Patch deserialize.ex:padding!/4."
 
       "VALID" ->
         :valid
@@ -3421,14 +3503,26 @@ defmodule AxonOnnx.Deserialize do
     end
   end
 
-  defp quantize_target_type(nil), do: {:u, 8}
+  defp quantize_target_type(zp_name, nil), do: quantize_target_type_fallback(zp_name)
 
-  defp quantize_target_type(%Nx.Tensor{} = t), do: Nx.type(t)
+  defp quantize_target_type(_zp_name, %Nx.Tensor{} = t), do: Nx.type(t)
 
-  defp quantize_target_type(%Axon{} = node) do
+  defp quantize_target_type(zp_name, %Axon{} = node) do
     case get_axon_node(node) do
       %Axon.Node{op: :constant, opts: [value: v]} -> Nx.type(v)
-      _ -> {:u, 8}
+      _ -> quantize_target_type_fallback(zp_name)
+    end
+  end
+
+  # When zero_point is a runtime graph input, Axon discards its declared
+  # dtype. Consult the proto-time input_types side channel (see
+  # `input_type/1`); fall back to u8 only if we really know nothing.
+  defp quantize_target_type_fallback(nil), do: {:u, 8}
+
+  defp quantize_target_type_fallback(name) do
+    case input_type(name) do
+      nil -> {:u, 8}
+      type -> type
     end
   end
 

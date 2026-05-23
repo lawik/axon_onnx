@@ -692,7 +692,34 @@ defmodule AxonOnnx.Coverage.Registry do
     {"simple", "test_shrink"} => {:passing, nil},
     {"simple", "test_sign_model"} => {:passing, nil},
     {"simple", "test_single_relu_model"} => {:passing, nil},
-    {"node", "test_maxpool_2d_ceil"} => {:unsupported, "MaxPool ceil_mode=1 unsupported by Axon.max_pool"},
+    {"node", "test_quantizelinear_uint16"} => {:passing, nil},
+    {"node", "test_maxpool_2d_ceil"} =>
+      {:unsupported, "MaxPool ceil_mode=1 unsupported by Axon.max_pool"},
+    # Known bugs — implemented but produce wrong outputs vs. the golden.
+    # Listed explicitly so future readers can distinguish them from
+    # not-yet-implemented ops.
+    {"node", "test_convtranspose_dilations"} =>
+      {:known_bug,
+       "Axon.Layers.conv_transpose with kernel_dilation != 1 diverges from " <>
+         "ONNX spec; see commit 06eb8bb."},
+    {"node", "test_quantizelinear_int8"} =>
+      {:known_bug,
+       "QuantizeLinear at s8 diverges from golden — round-half-to-even " <>
+         "boundary behaviour around -128/+127 doesn't match onnxruntime."},
+    {"node", "test_quantizelinear_int16"} =>
+      {:known_bug, "Same rounding-boundary mismatch as test_quantizelinear_int8."},
+    {"node", "test_qlinearmatmul_2D_int8_float16"} =>
+      {:known_bug,
+       "QLinearMatMul at s8 with float16 work-type loses precision in the " <>
+         "intermediate scale/divide before re-quantising."},
+    {"node", "test_qlinearmatmul_2D_int8_float32"} =>
+      {:known_bug, "Same s8 rounding mismatch as test_quantizelinear_int8."},
+    {"node", "test_qlinearmatmul_3D_int8_float16"} =>
+      {:known_bug,
+       "QLinearMatMul at s8 with float16 work-type loses precision in the " <>
+         "intermediate scale/divide before re-quantising."},
+    {"node", "test_qlinearmatmul_3D_int8_float32"} =>
+      {:known_bug, "Same s8 rounding mismatch as test_quantizelinear_int8."}
   }
 
   @doc "Returns the raw `{category, name} => {status, note}` map."

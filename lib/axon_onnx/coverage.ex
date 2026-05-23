@@ -20,7 +20,12 @@ defmodule AxonOnnx.Coverage do
   alias AxonOnnx.Coverage.Registry
 
   @cases_root Path.join(["test", "cases"])
-  @categories ~w(node pytorch-converted pytorch-operator simple light)
+  # `light/` is excluded — it's a flat directory of standalone .onnx files
+  # with adjacent `*_output_0.pb` goldens, not the standard
+  # `<test>/model.onnx + test_data_set_*/` layout that `discover/0` walks.
+  # Supporting it would need a different runner; for now nothing in `light/`
+  # is part of the registry.
+  @categories ~w(node pytorch-converted pytorch-operator simple)
 
   @type case_entry :: %{category: String.t(), name: String.t(), path: String.t()}
   @type status :: :passing | :unsupported | :known_bug
