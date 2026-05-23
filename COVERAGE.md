@@ -7,8 +7,8 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 650 | 36.3% |
-| unsupported | 1143 | 63.7% |
+| passing | 657 | 36.6% |
+| unsupported | 1136 | 63.4% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -17,8 +17,8 @@ Total cases: **1793**
 
 **node** — 1653 cases
 
-- passing: 557
-- unsupported: 1096
+- passing: 564
+- unsupported: 1089
 
 **pytorch-converted** — 82 cases
 
@@ -68,17 +68,17 @@ A case using N distinct ops contributes to N rows.
 | BitwiseOr | 4 | 0 | 4 | 0 | 0 | 0 |
 | BitwiseXor | 4 | 0 | 4 | 0 | 0 | 0 |
 | BlackmanWindow | 2 | 0 | 2 | 0 | 0 | 0 |
-| Cast | 284 | 7 | 277 | 0 | 0 | 0 |
+| Cast | 284 | 10 | 274 | 0 | 0 | 0 |
 | CastLike | 108 | 29 | 79 | 0 | 0 | 0 |
 | Ceil | 4 | 2 | 2 | 0 | 0 | 0 |
 | Celu | 1 | 1 | 0 | 0 | 0 | 0 |
 | CenterCropPad | 6 | 0 | 6 | 0 | 0 | 0 |
-| Clip | 16 | 7 | 9 | 0 | 0 | 0 |
+| Clip | 16 | 10 | 6 | 0 | 0 | 0 |
 | Col2Im | 5 | 0 | 5 | 0 | 0 | 0 |
 | Compress | 4 | 0 | 4 | 0 | 0 | 0 |
 | Concat | 133 | 13 | 120 | 0 | 0 | 0 |
 | ConcatFromSequence | 2 | 0 | 2 | 0 | 0 | 0 |
-| Constant | 274 | 36 | 238 | 0 | 0 | 0 |
+| Constant | 274 | 39 | 235 | 0 | 0 | 0 |
 | ConstantOfShape | 72 | 0 | 72 | 0 | 0 | 0 |
 | Conv | 33 | 27 | 6 | 0 | 0 | 0 |
 | ConvInteger | 2 | 0 | 2 | 0 | 0 | 0 |
@@ -89,9 +89,9 @@ A case using N distinct ops contributes to N rows.
 | DFT | 6 | 0 | 6 | 0 | 0 | 0 |
 | DeformConv | 4 | 0 | 4 | 0 | 0 | 0 |
 | DepthToSpace | 2 | 0 | 2 | 0 | 0 | 0 |
-| DequantizeLinear | 14 | 0 | 14 | 0 | 0 | 0 |
+| DequantizeLinear | 14 | 3 | 11 | 0 | 0 | 0 |
 | Det | 2 | 0 | 2 | 0 | 0 | 0 |
-| Div | 184 | 10 | 174 | 0 | 0 | 0 |
+| Div | 184 | 13 | 171 | 0 | 0 | 0 |
 | Dropout | 12 | 3 | 9 | 0 | 0 | 0 |
 | DynamicQuantizeLinear | 3 | 0 | 3 | 0 | 0 | 0 |
 | Einsum | 6 | 0 | 6 | 0 | 0 | 0 |
@@ -121,7 +121,7 @@ A case using N distinct ops contributes to N rows.
 | HardSigmoid | 4 | 4 | 0 | 0 | 0 | 0 |
 | HardSwish | 1 | 1 | 0 | 0 | 0 | 0 |
 | Hardmax | 7 | 7 | 0 | 0 | 0 | 0 |
-| Identity | 102 | 3 | 99 | 0 | 0 | 0 |
+| Identity | 102 | 6 | 96 | 0 | 0 | 0 |
 | If | 7 | 1 | 6 | 0 | 0 | 0 |
 | ImageDecoder | 9 | 0 | 9 | 0 | 0 | 0 |
 | InstanceNormalization | 3 | 0 | 3 | 0 | 0 | 0 |
@@ -141,13 +141,13 @@ A case using N distinct ops contributes to N rows.
 | LpPool | 8 | 0 | 8 | 0 | 0 | 0 |
 | MatMul | 74 | 5 | 69 | 0 | 0 | 0 |
 | MatMulInteger | 1 | 0 | 1 | 0 | 0 | 0 |
-| Max | 28 | 19 | 9 | 0 | 0 | 0 |
+| Max | 28 | 22 | 6 | 0 | 0 | 0 |
 | MaxPool | 28 | 22 | 6 | 0 | 0 | 0 |
 | MaxUnpool | 2 | 0 | 2 | 0 | 0 | 0 |
 | Mean | 3 | 3 | 0 | 0 | 0 | 0 |
 | MeanVarianceNormalization | 1 | 0 | 1 | 0 | 0 | 0 |
 | MelWeightMatrix | 1 | 0 | 1 | 0 | 0 | 0 |
-| Min | 21 | 18 | 3 | 0 | 0 | 0 |
+| Min | 21 | 21 | 0 | 0 | 0 | 0 |
 | Mish | 1 | 0 | 1 | 0 | 0 | 0 |
 | Mod | 75 | 9 | 66 | 0 | 0 | 0 |
 | Momentum | 3 | 0 | 3 | 0 | 0 | 0 |
@@ -166,7 +166,7 @@ A case using N distinct ops contributes to N rows.
 | Pow | 17 | 15 | 2 | 0 | 0 | 0 |
 | QLinearConv | 1 | 0 | 1 | 0 | 0 | 0 |
 | QLinearMatMul | 8 | 0 | 8 | 0 | 0 | 0 |
-| QuantizeLinear | 16 | 0 | 16 | 0 | 0 | 0 |
+| QuantizeLinear | 16 | 4 | 12 | 0 | 0 | 0 |
 | RMSNormalization | 19 | 19 | 0 | 0 | 0 | 0 |
 | RNN | 4 | 0 | 4 | 0 | 0 | 0 |
 | RandomUniformLike | 3 | 0 | 3 | 0 | 0 | 0 |
@@ -176,9 +176,9 @@ A case using N distinct ops contributes to N rows.
 | ReduceL2 | 9 | 0 | 9 | 0 | 0 | 0 |
 | ReduceLogSum | 5 | 0 | 5 | 0 | 0 | 0 |
 | ReduceLogSumExp | 9 | 0 | 9 | 0 | 0 | 0 |
-| ReduceMax | 41 | 2 | 39 | 0 | 0 | 0 |
+| ReduceMax | 41 | 5 | 36 | 0 | 0 | 0 |
 | ReduceMean | 73 | 3 | 70 | 0 | 0 | 0 |
-| ReduceMin | 13 | 2 | 11 | 0 | 0 | 0 |
+| ReduceMin | 13 | 5 | 8 | 0 | 0 | 0 |
 | ReduceProd | 9 | 2 | 7 | 0 | 0 | 0 |
 | ReduceSum | 94 | 0 | 94 | 0 | 0 | 0 |
 | ReduceSumSquare | 9 | 0 | 9 | 0 | 0 | 0 |
@@ -189,7 +189,7 @@ A case using N distinct ops contributes to N rows.
 | ReverseSequence | 2 | 0 | 2 | 0 | 0 | 0 |
 | RoiAlign | 3 | 0 | 3 | 0 | 0 | 0 |
 | RotaryEmbedding | 8 | 0 | 8 | 0 | 0 | 0 |
-| Round | 4 | 0 | 4 | 0 | 0 | 0 |
+| Round | 4 | 3 | 1 | 0 | 0 | 0 |
 | STFT | 2 | 0 | 2 | 0 | 0 | 0 |
 | Scan | 2 | 0 | 2 | 0 | 0 | 0 |
 | Scatter | 2 | 0 | 2 | 0 | 0 | 0 |
@@ -223,7 +223,7 @@ A case using N distinct ops contributes to N rows.
 | StringConcat | 5 | 0 | 5 | 0 | 0 | 0 |
 | StringNormalizer | 12 | 0 | 12 | 0 | 0 | 0 |
 | StringSplit | 6 | 0 | 6 | 0 | 0 | 0 |
-| Sub | 121 | 19 | 102 | 0 | 0 | 0 |
+| Sub | 121 | 22 | 99 | 0 | 0 | 0 |
 | Sum | 8 | 8 | 0 | 0 | 0 | 0 |
 | Swish | 1 | 0 | 1 | 0 | 0 | 0 |
 | Tan | 2 | 2 | 0 | 0 | 0 | 0 |

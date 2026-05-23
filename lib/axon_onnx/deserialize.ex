@@ -1373,6 +1373,102 @@ defmodule AxonOnnx.Deserialize do
 
   defp recur_nodes(
          %Node{
+           op_type: "DequantizeLinear",
+           input: inputs,
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # DequantizeLinear: y = (x - x_zero_point) * x_scale.
+    # All three inputs (x, scale, zero_point) participate. zero_point is
+    # optional in the spec; in the corpus it's always provided. axis
+    # support for per-channel/-block quantisation works as long as Nx's
+    # broadcasting handles the (rank-1) scale/zero shape correctly.
+    {x_name, scale_name, zp_name} =
+      case inputs do
+        [x, s] -> {x, s, nil}
+        [x, s, z] -> {x, s, z}
+      end
+
+    x = input!(x_name, axon, params, used_params)
+    scale = input!(scale_name, axon, params, used_params)
+
+    {fun, layer_inputs} =
+      case zp_name do
+        nil ->
+          {fn x, scale, _opts ->
+             Nx.multiply(Nx.as_type(x, Nx.type(scale)), scale)
+           end, [x, scale]}
+
+        _ ->
+          zp = input!(zp_name, axon, params, used_params)
+
+          {fn x, scale, zp, _opts ->
+             out_type = Nx.type(scale)
+
+             Nx.subtract(Nx.as_type(x, out_type), Nx.as_type(zp, out_type))
+             |> Nx.multiply(scale)
+           end, [x, scale, zp]}
+      end
+
+    layer = Axon.layer(fun, layer_inputs, name: output_name, op_name: :dequantize_linear)
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "QuantizeLinear",
+           input: inputs,
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # QuantizeLinear: y = saturate(round(x / y_scale) + y_zero_point) cast
+    # to zero_point's type. The saturate clamp is per dtype-range; without
+    # it Nx.as_type truncates on overflow, breaking the round-trip test.
+    {x_name, scale_name, zp_name} =
+      case inputs do
+        [x, s] -> {x, s, nil}
+        [x, s, z] -> {x, s, z}
+      end
+
+    x = input!(x_name, axon, params, used_params)
+    scale = input!(scale_name, axon, params, used_params)
+    zp = if zp_name, do: input!(zp_name, axon, params, used_params), else: nil
+
+    target_type = quantize_target_type(zp)
+
+    {min_v, max_v} = quantize_range(target_type)
+
+    {fun, layer_inputs} =
+      case zp do
+        nil ->
+          {fn x, scale, _opts ->
+             scaled = Nx.divide(x, scale)
+             rounded = Nx.round(scaled)
+             clipped = Nx.clip(rounded, min_v, max_v)
+             Nx.as_type(clipped, target_type)
+           end, [x, scale]}
+
+        _ ->
+          {fn x, scale, zp, _opts ->
+             work_type = Nx.type(scale)
+             scaled = Nx.divide(x, scale)
+             rounded = Nx.round(scaled)
+             shifted = Nx.add(rounded, Nx.as_type(zp, work_type))
+             clipped = Nx.clip(shifted, min_v, max_v)
+             Nx.as_type(clipped, target_type)
+           end, [x, scale, zp]}
+      end
+
+    layer = Axon.layer(fun, layer_inputs, name: output_name, op_name: :quantize_linear)
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
            op_type: "NegativeLogLikelihoodLoss",
            attribute: attrs,
            input: inputs,
@@ -3028,6 +3124,27 @@ defmodule AxonOnnx.Deserialize do
         Nx.divide(Nx.sum(masked_loss), Nx.sum(masked_weights))
     end
   end
+
+  defp quantize_target_type(nil), do: {:u, 8}
+
+  defp quantize_target_type(%Nx.Tensor{} = t), do: Nx.type(t)
+
+  defp quantize_target_type(%Axon{} = node) do
+    case get_axon_node(node) do
+      %Axon.Node{op: :constant, opts: [value: v]} -> Nx.type(v)
+      _ -> {:u, 8}
+    end
+  end
+
+  defp quantize_range({:u, 8}), do: {0, 255}
+  defp quantize_range({:s, 8}), do: {-128, 127}
+  defp quantize_range({:u, 16}), do: {0, 65_535}
+  defp quantize_range({:s, 16}), do: {-32_768, 32_767}
+  defp quantize_range({:u, 32}), do: {0, 4_294_967_295}
+  defp quantize_range({:s, 32}), do: {-2_147_483_648, 2_147_483_647}
+
+  defp quantize_range(other),
+    do: raise(ArgumentError, "QuantizeLinear: unsupported target dtype #{inspect(other)}")
 
   defp do_scatter_elements(data, indices, updates, axis, reduction) do
     rank = Nx.rank(data)
