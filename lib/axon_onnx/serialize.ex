@@ -97,8 +97,36 @@ defmodule AxonOnnx.Serialize do
 
     {output, _, _} = to_value_info(output_node, output_shape, op_counts, cache)
 
+    # onnxruntime mishandles graphs whose output name coincides with an input
+    # name (the runtime returns a view aliased to the input buffer, which gets
+    # invalidated as soon as the input numpy array goes out of scope — see
+    # SerializeTest.basic_in_out's pre-fix garbage output). Inserting an
+    # explicit Identity node renames the output and forces onnxruntime to
+    # materialise an independent buffer.
+    output_name_used = output.name
+    input_names = MapSet.new(updated_inputs, & &1.name)
+    nodes_in_order = Enum.reverse(nodes)
+
+    {nodes_in_order, output} =
+      if MapSet.member?(input_names, output_name_used) do
+        new_output_name = output_name_used <> "_output"
+        renamed_output = %{output | name: new_output_name}
+
+        identity_node = %Node{
+          input: [output_name_used],
+          output: [new_output_name],
+          name: new_output_name,
+          op_type: "Identity",
+          attribute: []
+        }
+
+        {nodes_in_order ++ [identity_node], renamed_output}
+      else
+        {nodes_in_order, output}
+      end
+
     %Graph{
-      node: Enum.reverse(nodes),
+      node: nodes_in_order,
       name: output_name,
       input: updated_inputs,
       output: [output],
