@@ -7,8 +7,8 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 581 | 32.4% |
-| unsupported | 1212 | 67.6% |
+| passing | 586 | 32.7% |
+| unsupported | 1207 | 67.3% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -17,8 +17,8 @@ Total cases: **1793**
 
 **node** — 1653 cases
 
-- passing: 488
-- unsupported: 1165
+- passing: 493
+- unsupported: 1160
 
 **pytorch-converted** — 82 cases
 
@@ -105,7 +105,7 @@ A case using N distinct ops contributes to N rows.
 | Floor | 2 | 2 | 0 | 0 | 0 | 0 |
 | GRU | 4 | 0 | 4 | 0 | 0 | 0 |
 | Gather | 33 | 5 | 28 | 0 | 0 | 0 |
-| GatherElements | 21 | 0 | 21 | 0 | 0 | 0 |
+| GatherElements | 21 | 3 | 18 | 0 | 0 | 0 |
 | GatherND | 3 | 0 | 3 | 0 | 0 | 0 |
 | Gelu | 4 | 0 | 4 | 0 | 0 | 0 |
 | Gemm | 14 | 14 | 0 | 0 | 0 | 0 |
@@ -161,7 +161,7 @@ A case using N distinct ops contributes to N rows.
 | OptionalGetElement | 4 | 0 | 4 | 0 | 0 | 0 |
 | OptionalHasElement | 7 | 0 | 7 | 0 | 0 | 0 |
 | Or | 24 | 24 | 0 | 0 | 0 | 0 |
-| PRelu | 8 | 0 | 8 | 0 | 0 | 0 |
+| PRelu | 8 | 2 | 6 | 0 | 0 | 0 |
 | Pad | 18 | 2 | 16 | 0 | 0 | 0 |
 | Pow | 17 | 15 | 2 | 0 | 0 | 0 |
 | QLinearConv | 1 | 0 | 1 | 0 | 0 | 0 |

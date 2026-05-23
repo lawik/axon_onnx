@@ -1302,6 +1302,34 @@ defmodule AxonOnnx.Deserialize do
 
   defp recur_nodes(
          %Node{
+           op_type: "GatherElements",
+           attribute: attrs,
+           input: [data_name, indices_name],
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # GatherElements is per-index take along a single axis. Indices must
+    # have the same rank as data and the output adopts the indices' shape.
+    # Maps cleanly to Nx.take_along_axis once indices are cast to int64.
+    axis = options!(attrs)["axis"] || 0
+    data = input!(data_name, axon, params, used_params)
+    indices = input!(indices_name, axon, params, used_params)
+
+    fun = fn d, i, _opts ->
+      i = Nx.as_type(i, {:s, 64})
+      dim = Nx.axis_size(d, axis)
+      i = Nx.select(Nx.less(i, 0), Nx.add(i, dim), i)
+      Nx.take_along_axis(d, i, axis: axis)
+    end
+
+    layer = Axon.layer(fun, [data, indices], name: output_name, op_name: :gather_elements)
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
            op_type: "RMSNormalization",
            attribute: attrs,
            input: [input_name, scale_name],
@@ -1915,31 +1943,48 @@ defmodule AxonOnnx.Deserialize do
   end
 
   defp recur_nodes(
-         %Node{op_type: "CumSum", input: [x, axis], output: [output_name]},
+         %Node{
+           op_type: "CumSum",
+           attribute: attrs,
+           input: [x_name, axis_name],
+           output: [output_name]
+         },
          {axon, params, used_params}
        ) do
-    x = axon!(x, axon)
-    axis = constant!(axis, axon, params, used_params) |> Nx.to_number()
+    # CumSum opset 11+: takes (x, axis) inputs plus `exclusive` and `reverse`
+    # attributes. Lower to Nx.cumulative_sum, which natively supports
+    # `reverse`. Exclusive mode is the inclusive cumsum minus x (works for
+    # both forward and reverse direction).
+    opts = options!(attrs)
+    exclusive = (opts["exclusive"] || 0) == 1
+    reverse = (opts["reverse"] || 0) == 1
 
-    fun = fn x ->
-      n = elem(Nx.shape(x), axis)
+    x = input!(x_name, axon, params, used_params)
+    axis = constant!(axis_name, axon, params, used_params) |> Nx.to_number()
 
-      padding_config =
-        for i <- 0..(Nx.rank(x) - 1) do
-          if i == axis, do: {n - 1, 0}, else: {0, 0}
-        end
-
-      strides = List.duplicate(1, Nx.rank(x))
-
-      window_shape =
-        List.duplicate(1, Nx.rank(x))
-        |> List.to_tuple()
-        |> put_elem(axis, n)
-
-      Nx.window_sum(x, window_shape, strides: strides, padding: padding_config)
+    fun = fn x, _opts ->
+      cumsum = Nx.cumulative_sum(x, axis: axis, reverse: reverse)
+      if exclusive, do: Nx.subtract(cumsum, x), else: cumsum
     end
 
-    updated_axon = Map.put(axon, output_name, Axon.nx(x, fun, op_name: :cumsum))
+    layer = Axon.layer(fun, [x], name: output_name, op_name: :cumsum)
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{op_type: "PRelu", input: [x_name, slope_name], output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    x = input!(x_name, axon, params, used_params)
+    slope = input!(slope_name, axon, params, used_params)
+
+    fun = fn x, s, _opts ->
+      Nx.select(Nx.less(x, 0), Nx.multiply(s, x), x)
+    end
+
+    layer = Axon.layer(fun, [x, slope], name: output_name, op_name: :prelu)
+    updated_axon = Map.put(axon, output_name, layer)
     {updated_axon, params, used_params}
   end
 
