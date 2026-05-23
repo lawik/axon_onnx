@@ -552,6 +552,126 @@ defmodule AxonOnnx.Serialize do
     {:tanh, "Tanh"}
   ]
 
+  ## Arithmetic binary ops (Axon.add / Axon.subtract / Axon.multiply)
+
+  # These are produced by `Axon.add/2`, `Axon.subtract/2`, `Axon.multiply/2`,
+  # which wrap their two inputs in an `Axon.container({a, b})` and create a
+  # single-parent atom op (:add / :subtract / :multiply). Resolve the
+  # container's tuple of children and emit an ONNX Add/Sub/Mul.
+  @axon_arithmetic_to_onnx %{add: "Add", subtract: "Sub", multiply: "Mul"}
+
+  defp to_onnx(
+         %Axon.Node{id: id, op: op, name: name_fn, parent: [container_id]},
+         nodes_map,
+         templates,
+         inputs,
+         param_names,
+         nodes,
+         op_counts,
+         cache
+       )
+       when is_map_key(@axon_arithmetic_to_onnx, op) do
+    onnx_op = Map.fetch!(@axon_arithmetic_to_onnx, op)
+
+    %Axon.Node{op: :container, parent: [children_tuple]} = nodes_map[container_id]
+    [a_id, b_id] = Tuple.to_list(children_tuple)
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[a_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[b_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    {name, op_counts, cache} =
+      case cache do
+        %{^id => name} ->
+          {name, op_counts, cache}
+
+        %{} ->
+          name = name_fn.(op, op_counts)
+          op_counts = Map.update(op_counts, op, 1, fn x -> x + 1 end)
+          cache = Map.put(cache, id, name)
+          {name, op_counts, cache}
+      end
+
+    node = %Node{
+      input: [cache[a_id], cache[b_id]],
+      output: [name],
+      name: name,
+      op_type: onnx_op,
+      attribute: []
+    }
+
+    {inputs, param_names, [node | nodes], op_counts, cache}
+  end
+
+  ## Binary Nx ops (Axon.layer escape hatch with two inputs)
+
+  # The deserializer's @binary_op_types creates Axon.layer nodes with
+  # op_name in {:logical_and, :divide, :equal, …}. Match the parent shape
+  # (two element list) and dispatch by op_name.
+  @nx_binary_op_to_onnx %{
+    logical_and: "And",
+    divide: "Div",
+    equal: "Equal",
+    greater: "Greater",
+    greater_equal: "GreaterOrEqual",
+    less: "Less",
+    less_or_equal: "LessOrEqual",
+    mod: "Mod",
+    logical_or: "Or",
+    power: "Pow",
+    logical_xor: "Xor"
+  }
+
+  defp to_onnx(
+         %Axon.Node{
+           id: id,
+           op: op,
+           op_name: op_name,
+           name: name_fn,
+           parent: [a_id, b_id]
+         },
+         nodes_map,
+         templates,
+         inputs,
+         param_names,
+         nodes,
+         op_counts,
+         cache
+       )
+       when is_function(op) and is_map_key(@nx_binary_op_to_onnx, op_name) do
+    onnx_op = Map.fetch!(@nx_binary_op_to_onnx, op_name)
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[a_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[b_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    {name, op_counts, cache} =
+      case cache do
+        %{^id => name} ->
+          {name, op_counts, cache}
+
+        %{} ->
+          name = name_fn.(op_name, op_counts)
+          op_counts = Map.update(op_counts, op_name, 1, fn x -> x + 1 end)
+          cache = Map.put(cache, id, name)
+          {name, op_counts, cache}
+      end
+
+    node = %Node{
+      input: [cache[a_id], cache[b_id]],
+      output: [name],
+      name: name,
+      op_type: onnx_op,
+      attribute: []
+    }
+
+    {inputs, param_names, [node | nodes], op_counts, cache}
+  end
+
   ## Unary Nx ops (Axon.nx escape hatch)
 
   # The deserializer's @nx_op_types maps "Abs" → &Nx.abs/1 etc. and builds
