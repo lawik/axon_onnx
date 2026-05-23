@@ -7,8 +7,8 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 586 | 32.7% |
-| unsupported | 1207 | 67.3% |
+| passing | 597 | 33.3% |
+| unsupported | 1196 | 66.7% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -17,8 +17,8 @@ Total cases: **1793**
 
 **node** — 1653 cases
 
-- passing: 493
-- unsupported: 1160
+- passing: 504
+- unsupported: 1149
 
 **pytorch-converted** — 82 cases
 
@@ -120,7 +120,7 @@ A case using N distinct ops contributes to N rows.
 | HannWindow | 2 | 0 | 2 | 0 | 0 | 0 |
 | HardSigmoid | 4 | 4 | 0 | 0 | 0 | 0 |
 | HardSwish | 1 | 1 | 0 | 0 | 0 | 0 |
-| Hardmax | 7 | 0 | 7 | 0 | 0 | 0 |
+| Hardmax | 7 | 7 | 0 | 0 | 0 | 0 |
 | Identity | 102 | 3 | 99 | 0 | 0 | 0 |
 | If | 7 | 0 | 7 | 0 | 0 | 0 |
 | ImageDecoder | 9 | 0 | 9 | 0 | 0 | 0 |
@@ -193,7 +193,7 @@ A case using N distinct ops contributes to N rows.
 | STFT | 2 | 0 | 2 | 0 | 0 | 0 |
 | Scan | 2 | 0 | 2 | 0 | 0 | 0 |
 | Scatter | 2 | 0 | 2 | 0 | 0 | 0 |
-| ScatterElements | 6 | 0 | 6 | 0 | 0 | 0 |
+| ScatterElements | 6 | 4 | 2 | 0 | 0 | 0 |
 | ScatterND | 5 | 0 | 5 | 0 | 0 | 0 |
 | Selu | 5 | 5 | 0 | 0 | 0 | 0 |
 | SequenceAt | 4 | 0 | 4 | 0 | 0 | 0 |

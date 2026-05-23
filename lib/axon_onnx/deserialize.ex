@@ -1302,6 +1302,66 @@ defmodule AxonOnnx.Deserialize do
 
   defp recur_nodes(
          %Node{
+           op_type: "ScatterElements",
+           attribute: attrs,
+           input: [data_name, indices_name, updates_name],
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # ScatterElements writes updates into data at positions derived by
+    # combining the per-element indices with the surrounding coordinates of
+    # the indices tensor. The Nx primitives are `indexed_put` (reduction=none),
+    # `indexed_add` (reduction=add), and a manual scatter-accumulate for
+    # mul/min/max. We construct the per-element full (n, rank) coordinate
+    # matrix once and dispatch on the reduction attribute.
+    options = options!(attrs)
+    axis = options["axis"] || 0
+    reduction = options["reduction"] || "none"
+
+    data = input!(data_name, axon, params, used_params)
+    indices = input!(indices_name, axon, params, used_params)
+    updates = input!(updates_name, axon, params, used_params)
+
+    fun = fn d, i, u, _opts ->
+      do_scatter_elements(d, i, u, axis, reduction)
+    end
+
+    layer =
+      Axon.layer(fun, [data, indices, updates], name: output_name, op_name: :scatter_elements)
+
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "Hardmax",
+           attribute: attrs,
+           input: [input_name],
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # Hardmax: 1.0 at the argmax position along axis, 0.0 elsewhere. The
+    # output has the same dtype as the input.
+    axis = options!(attrs)["axis"] || -1
+    input = input!(input_name, axon, params, used_params)
+
+    fun = fn x, _opts ->
+      argmax = Nx.argmax(x, axis: axis, keep_axis: true)
+      iota = Nx.iota(Nx.shape(x), axis: axis)
+      mask = Nx.equal(iota, argmax)
+      Nx.as_type(mask, Nx.type(x))
+    end
+
+    layer = Axon.layer(fun, [input], name: output_name, op_name: :hardmax)
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
            op_type: "GatherElements",
            attribute: attrs,
            input: [data_name, indices_name],
@@ -2798,6 +2858,44 @@ defmodule AxonOnnx.Deserialize do
         fun = fn x, _opts -> do_trilu(x, Nx.tensor(k, type: {:s, 64}), upper) end
         layer = Axon.layer(fun, [inp], name: output_name, op_name: :trilu)
         {Map.put(axon, output_name, layer), params, used_params}
+    end
+  end
+
+  defp do_scatter_elements(data, indices, updates, axis, reduction) do
+    rank = Nx.rank(data)
+    pos_axis = if axis < 0, do: rank + axis, else: axis
+
+    indices_shape = Nx.shape(indices)
+    indices = Nx.as_type(indices, {:s, 64})
+    dim_size = Nx.axis_size(data, pos_axis)
+    indices = Nx.select(Nx.less(indices, 0), Nx.add(indices, dim_size), indices)
+
+    coord_tensors =
+      for k <- 0..(rank - 1) do
+        if k == pos_axis do
+          indices
+        else
+          Nx.iota(indices_shape, axis: k, type: {:s, 64})
+        end
+      end
+
+    flat_coords =
+      coord_tensors
+      |> Nx.stack(axis: -1)
+      |> Nx.reshape({:auto, rank})
+
+    flat_updates = Nx.flatten(updates)
+
+    case reduction do
+      "none" ->
+        Nx.indexed_put(data, flat_coords, flat_updates)
+
+      "add" ->
+        Nx.indexed_add(data, flat_coords, flat_updates)
+
+      other ->
+        raise ArgumentError,
+              "ScatterElements reduction=#{inspect(other)} is not yet supported"
     end
   end
 
