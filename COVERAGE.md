@@ -7,22 +7,22 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 680 | 37.9% |
-| unsupported | 1106 | 61.7% |
+| passing | 686 | 38.3% |
+| unsupported | 1100 | 61.3% |
 | known_bug | 7 | 0.4% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 ## Round-trip coverage
 
-Of the 680 cases that import cleanly, how many also export back to
+Of the 686 cases that import cleanly, how many also export back to
 ONNX and re-import with matching predictions (the full bidirectional
 Nx/Axon ⇄ ONNX path).
 
 | Classification | Count | % of import-passing |
 |---|---|---|
-| passing | 302 | 44.4% |
-| unsupported | 378 | 55.6% |
+| passing | 308 | 44.9% |
+| unsupported | 378 | 55.1% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -43,8 +43,8 @@ Nx/Axon ⇄ ONNX path).
 
 **pytorch-operator** — 35 cases
 
-- passing: 21
-- unsupported: 14
+- passing: 27
+- unsupported: 8
 
 **simple** — 23 cases
 
@@ -63,7 +63,7 @@ A case using N distinct ops contributes to N rows.
 | Acosh | 2 | 2 | 0 | 0 | 0 | 0 |
 | Adagrad | 2 | 0 | 2 | 0 | 0 | 0 |
 | Adam | 2 | 0 | 2 | 0 | 0 | 0 |
-| Add | 175 | 23 | 152 | 0 | 0 | 0 |
+| Add | 175 | 27 | 148 | 0 | 0 | 0 |
 | AffineGrid | 4 | 0 | 4 | 0 | 0 | 0 |
 | And | 70 | 8 | 62 | 0 | 0 | 0 |
 | ArgMax | 16 | 16 | 0 | 0 | 0 | 0 |
@@ -94,7 +94,7 @@ A case using N distinct ops contributes to N rows.
 | Compress | 4 | 0 | 4 | 0 | 0 | 0 |
 | Concat | 133 | 13 | 120 | 0 | 0 | 0 |
 | ConcatFromSequence | 2 | 0 | 2 | 0 | 0 | 0 |
-| Constant | 274 | 39 | 235 | 0 | 0 | 0 |
+| Constant | 274 | 40 | 234 | 0 | 0 | 0 |
 | ConstantOfShape | 72 | 0 | 72 | 0 | 0 | 0 |
 | Conv | 33 | 27 | 6 | 0 | 0 | 0 |
 | ConvInteger | 2 | 1 | 0 | 1 | 0 | 0 |
@@ -138,7 +138,7 @@ A case using N distinct ops contributes to N rows.
 | HardSwish | 1 | 1 | 0 | 0 | 0 | 0 |
 | Hardmax | 7 | 7 | 0 | 0 | 0 | 0 |
 | Identity | 102 | 6 | 96 | 0 | 0 | 0 |
-| If | 7 | 1 | 6 | 0 | 0 | 0 |
+| If | 7 | 0 | 6 | 1 | 0 | 0 |
 | ImageDecoder | 9 | 0 | 9 | 0 | 0 | 0 |
 | InstanceNormalization | 3 | 0 | 3 | 0 | 0 | 0 |
 | IsInf | 4 | 2 | 2 | 0 | 0 | 0 |
@@ -179,10 +179,10 @@ A case using N distinct ops contributes to N rows.
 | Or | 24 | 24 | 0 | 0 | 0 | 0 |
 | PRelu | 8 | 2 | 6 | 0 | 0 | 0 |
 | Pad | 18 | 2 | 16 | 0 | 0 | 0 |
-| Pow | 17 | 15 | 2 | 0 | 0 | 0 |
+| Pow | 17 | 16 | 1 | 0 | 0 | 0 |
 | QLinearConv | 1 | 1 | 0 | 0 | 0 | 0 |
 | QLinearMatMul | 8 | 4 | 0 | 4 | 0 | 0 |
-| QuantizeLinear | 16 | 6 | 9 | 1 | 0 | 0 |
+| QuantizeLinear | 16 | 7 | 9 | 0 | 0 | 0 |
 | RMSNormalization | 19 | 19 | 0 | 0 | 0 | 0 |
 | RNN | 4 | 0 | 4 | 0 | 0 | 0 |
 | RandomUniformLike | 3 | 0 | 3 | 0 | 0 | 0 |
@@ -234,7 +234,7 @@ A case using N distinct ops contributes to N rows.
 | SpaceToDepth | 2 | 0 | 2 | 0 | 0 | 0 |
 | Split | 27 | 1 | 26 | 0 | 0 | 0 |
 | SplitToSequence | 6 | 0 | 6 | 0 | 0 | 0 |
-| Sqrt | 139 | 7 | 132 | 0 | 0 | 0 |
+| Sqrt | 139 | 8 | 131 | 0 | 0 | 0 |
 | Squeeze | 34 | 2 | 32 | 0 | 0 | 0 |
 | StringConcat | 5 | 0 | 5 | 0 | 0 | 0 |
 | StringNormalizer | 12 | 0 | 12 | 0 | 0 | 0 |

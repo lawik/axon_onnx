@@ -1135,7 +1135,18 @@ defmodule AxonOnnx.Deserialize do
           {updated_axon, updated_params}
 
         {%Axon.Node{}, %Nx.Tensor{} = kernel, %Axon.Node{op: :constant, opts: [value: v]}} ->
-          shape = Axon.Shape.conv_bias_reshape(Nx.shape(v), Nx.rank(kernel) - 2, :first)
+          # Reshape a 1-D bias of shape {C_out} to {1, C_out, 1, ..., 1} for
+          # channels=:first broadcasting. Axon 0.8 reworked
+          # Axon.Shape.conv_bias_reshape's signature to take tensors; we
+          # inline the shape formula here so we don't need the helper.
+          spatial_rank = Nx.rank(kernel) - 2
+
+          shape =
+            case Nx.shape(v) do
+              {} -> {}
+              {c_out} -> List.to_tuple([1, c_out | List.duplicate(1, spatial_rank)])
+              other -> other
+            end
 
           out_layer =
             Axon.conv(
@@ -2465,8 +2476,9 @@ defmodule AxonOnnx.Deserialize do
             |> Axon.get_inputs()
             |> Map.new(fn {k, v} -> {k, Nx.broadcast(0.0, v)} end)
 
-          shape = Axon.get_output_shape(input, layer_inputs)
-          template = Nx.template(shape, {:f, 32})
+          # Axon 0.8 `get_output_shape/2` returns a template (Nx.Tensor with
+          # TemplateBackend), not a shape tuple. Use it directly.
+          template = Axon.get_output_shape(input, layer_inputs)
           Axon.constant(fun.(template, []), name: output_name)
       end
 
@@ -2497,8 +2509,9 @@ defmodule AxonOnnx.Deserialize do
             |> Axon.get_inputs()
             |> Map.new(fn {k, v} -> {k, Nx.broadcast(0.0, v)} end)
 
-          shape = Axon.get_output_shape(input, layer_inputs)
-          template = Nx.template(shape, {:f, 32})
+          # Axon 0.8 `get_output_shape/2` returns a template (Nx.Tensor with
+          # TemplateBackend), not a shape tuple. Use it directly.
+          template = Axon.get_output_shape(input, layer_inputs)
           Axon.constant(fun.(template), name: output_name)
       end
 
@@ -3236,8 +3249,9 @@ defmodule AxonOnnx.Deserialize do
             |> Axon.get_inputs()
             |> Map.new(fn {k, v} -> {k, Nx.broadcast(0.0, v)} end)
 
-          shape = Axon.get_output_shape(inp, layer_inputs)
-          mask_layer = Axon.constant(Nx.broadcast(0, shape))
+          # get_output_shape/2 returns a template; pull the shape tuple.
+          template = Axon.get_output_shape(inp, layer_inputs)
+          mask_layer = Axon.constant(Nx.broadcast(0, Nx.shape(template)))
 
           axon
           |> Map.put(output_name, dropout_layer)
@@ -3825,7 +3839,8 @@ defmodule AxonOnnx.Deserialize do
       |> Axon.get_inputs()
       |> Map.new(fn {k, v} -> {k, Nx.broadcast(0.0, v)} end)
 
-    Axon.get_output_shape(node, layer_inputs)
+    # Axon 0.8 returns a template tensor; pull the shape.
+    Axon.get_output_shape(node, layer_inputs) |> Nx.shape()
   end
 
   defp broadcast_q_params(scale, zp, x, axis) do

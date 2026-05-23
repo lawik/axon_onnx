@@ -36,11 +36,11 @@ defmodule AxonOnnx.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:axon, "~> 0.5", axon_opts()},
+      {:axon, "~> 0.8", axon_opts()},
       {:protox, "~> 1.6.10"},
-      {:nx, "~> 0.5", nx_opts()},
-      {:exla, "~> 0.5", [only: :test] ++ exla_opts()},
-      {:req, "~> 0.1.0", only: :test},
+      {:nx, "~> 0.12", nx_opts()},
+      {:exla, "~> 0.12", [only: :test] ++ exla_opts()},
+      {:req, "~> 0.5", only: :test},
       {:jason, "~> 1.2", only: :test},
       {:ex_doc, "~> 0.23", only: :docs}
     ]

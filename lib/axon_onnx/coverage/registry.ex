@@ -253,7 +253,6 @@ defmodule AxonOnnx.Coverage.Registry do
     {"node", "test_hardswish"} => {:passing, nil},
     {"node", "test_hardswish_expanded"} => {:passing, nil},
     {"node", "test_identity"} => {:passing, nil},
-    {"node", "test_if"} => {:passing, nil},
     {"node", "test_isinf"} => {:passing, nil},
     {"node", "test_isinf_float16"} => {:passing, nil},
     {"node", "test_isnan"} => {:passing, nil},
@@ -699,6 +698,13 @@ defmodule AxonOnnx.Coverage.Registry do
     {"simple", "test_shrink"} => {:passing, nil},
     {"simple", "test_sign_model"} => {:passing, nil},
     {"simple", "test_single_relu_model"} => {:passing, nil},
+    {"node", "test_quantizelinear_int16"} => {:passing, nil},
+    {"pytorch-operator", "test_operator_add_broadcast"} => {:passing, nil},
+    {"pytorch-operator", "test_operator_add_size1_right_broadcast"} => {:passing, nil},
+    {"pytorch-operator", "test_operator_add_size1_singleton_broadcast"} => {:passing, nil},
+    {"pytorch-operator", "test_operator_addconstant"} => {:passing, nil},
+    {"pytorch-operator", "test_operator_pow"} => {:passing, nil},
+    {"pytorch-operator", "test_operator_sqrt"} => {:passing, nil},
     {"node", "test_maxpool_2d_ceil"} =>
       {:unsupported, "MaxPool ceil_mode=1 unsupported by Axon.max_pool"},
     {"node", "test_convtranspose_dilations"} =>
@@ -709,8 +715,6 @@ defmodule AxonOnnx.Coverage.Registry do
       {:known_bug,
        "QuantizeLinear at s8 diverges from golden — round-half-to-even " <>
          "boundary behaviour around -128/+127 doesn't match onnxruntime."},
-    {"node", "test_quantizelinear_int16"} =>
-      {:known_bug, "Same rounding-boundary mismatch as test_quantizelinear_int8."},
     {"node", "test_qlinearmatmul_2D_int8_float16"} =>
       {:known_bug,
        "QLinearMatMul at s8 with float16 work-type loses precision in the " <>
@@ -724,7 +728,12 @@ defmodule AxonOnnx.Coverage.Registry do
     {"node", "test_qlinearmatmul_3D_int8_float32"} =>
       {:known_bug, "Same s8 rounding mismatch as test_quantizelinear_int8."},
     {"node", "test_convinteger_with_padding"} =>
-      {:known_bug, "ConvInteger with non-zero padding diverges from golden."}
+      {:known_bug, "ConvInteger with non-zero padding diverges from golden."},
+    {"node", "test_if"} =>
+      {:known_bug,
+       "Axon 0.8 + Nx 0.12: Nx.Defn.Tree.scope_ids_each raises on " <>
+         "Nx.Tensor in Axon.cond branches. Worked under 0.5; needs " <>
+         "upstream fix or different subgraph encoding."}
   }
 
   @doc "Returns the raw `{category, name} => {status, note}` map."

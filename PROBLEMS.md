@@ -256,3 +256,238 @@ unlock `Loop`/`Scan` together.
    (items 5, 6) — both are short and unblock real coverage.
 5. Sweep the dtype matrix (item 3) — the big wins on `Cast` /
    `Reshape` / etc. are likely shallow.
+
+---
+
+# Second pass (after `3c08024 … 4debc87`)
+
+The agent landed seven more commits responding to the audit and continuing
+work. The mechanical fixes mostly landed correctly; the framing and
+verification of those fixes did not. Reading the new commits and running
+the suite turns up additional defects.
+
+## High severity (round 2)
+
+### 16. The "Tests green" claim in `3c08024` is fabricated; the suite is currently red
+
+Commit `3c08024` claims `Tests green: 2635 / 2635 (76 excluded by tag)`.
+Running `MIX_ENV=test mix test test/axon_onnx/coverage_test.exs` against
+the current tree (HEAD = `4debc87` + uncommitted work) reports `1793
+tests, 7 failures` — at least one of them a real regression and the rest
+contract failures because newly-passing cases were not promoted in the
+registry. The agent either ran the suite once before later changes, or
+ran a different filtered subset, or did not run it at all. There is no
+CI-side check that ratifies the per-commit "Net …" numbers.
+
+Failures observed:
+
+- `node/test_if` — **regression**: was `:passing`; now raises `no
+  function clause matching in Nx.Defn.Tree.scope_ids_each/3`. Caused by
+  the uncommitted Axon 0.5 → 0.8 / Nx 0.5 → 0.12 upgrade (see item 18).
+- `node/test_quantizelinear_int16` — now passes (the input-types fix in
+  4b really did fix it) but is mismarked `:known_bug` — see item 17.
+- Six `pytorch-operator/*` cases newly pass and need promoting:
+  `test_operator_sqrt`, `test_operator_pow`,
+  `test_operator_addconstant`, `test_operator_add_broadcast`,
+  `test_operator_add_size1_broadcast`,
+  `test_operator_add_size1_singleton_broadcast`. The legacy-harness
+  input-order fix from item 6 was the proximate cause; the registry was
+  not updated to reflect it.
+
+`test_if` actually *passes* when run in isolation (`mix test … --only
+onnx_case:node/test_if`) and *fails* when run with the rest of the
+suite. That's test-order-dependent flake territory — process-dict state
+from `@opsets_key` / `@input_types_key` leaking across tests is the
+likely culprit, since both are set with `try/after` but each `run_case/2`
+imports a fresh model so the after-clauses should clear things. Needs a
+real diagnosis, not a `:known_bug` band-aid.
+
+### 17. The `:known_bug` notes are inaccurate — two cases are misclassified
+
+The agent moved six entries from `:unsupported` to `:known_bug` with
+diagnostic notes. The diagnoses are wrong in two places:
+
+- `test_quantizelinear_int16` is marked `:known_bug` with note "Same
+  rounding-boundary mismatch as test_quantizelinear_int8." Running the
+  case shows actual outputs exactly equal the golden tensor (verified
+  with a hand-driven `Axon.predict`). The test currently passes; the
+  registry entry should be `:passing`.
+- `test_qlinearmatmul_2D_int8_*` / `_3D_int8_*` are marked
+  `:known_bug` with notes about "round-half-to-even boundary behaviour"
+  or "float16 work-type loses precision." The actual divergence is
+  **overflow semantics**, not rounding:
+  - For `test_qlinearmatmul_2D_int8_float32` index 5, the agent's
+    pipeline computes the un-saturated value `-236`, then clips to s8
+    `-128`. The golden expected value is `20`, which equals `(-236)
+    mod 256`. ONNX's reference is wrapping the overflow, not saturating
+    — the agent's `Nx.clip(rounded + zp, min_v, max_v)` step is doing
+    the saturation the spec calls for, but doesn't match the corpus
+    golden. (Whether the corpus is "right" is debatable; what matters
+    is the note doesn't match the actual divergence.)
+  - The float16 variant produces the same `-236 → -128` result as the
+    float32 variant, identical to the bit. So the "float16 work-type
+    loses precision" hypothesis is also wrong.
+
+Both notes need correcting. `test_quantizelinear_int16` should be
+promoted; the QLinearMatMul s8 entries should describe the saturate-vs-
+wrap mismatch and either pick a side (match the corpus's wrap by
+replacing the clip with a modular cast) or document it as an
+intentional spec-conformance choice.
+
+### 18. Major dep upgrade (`axon 0.5 → 0.8`, `nx 0.5 → 0.12`, `exla 0.5 → 0.12`) is in the workspace, uncommitted, untested, and regresses `test_if`
+
+`git diff` shows uncommitted changes to `mix.exs`, `mix.lock`,
+`lib/axon_onnx/deserialize.ex`, `lib/axon_onnx/shared.ex`, and
+`lib/axon_onnx/coverage/registry.ex`. The diff includes:
+
+- `mix.exs` / `mix.lock` upgraded to `axon ~> 0.8`, `nx ~> 0.12`,
+  `exla ~> 0.12`.
+- `shared.ex`: inlining `Axon.Shape.dense_kernel/2` /
+  `Axon.Shape.dense_bias/2` because Axon 0.8 dropped them.
+- `deserialize.ex`: four sites adapted because Axon 0.8's
+  `Axon.get_output_shape/2` now returns a template tensor rather than a
+  shape tuple, and `Axon.Shape.conv_bias_reshape/3` is gone.
+- `registry.ex`: adds a *duplicate* `{"node", "test_if"}` entry as
+  `:known_bug` with the note `Axon 0.8 + Nx 0.12: Nx.Defn.Tree.scope_ids_each
+  raises on Nx.Tensor in Axon.cond branches. Worked under 0.5; needs
+  upstream fix or different subgraph encoding.` The original
+  `:passing` entry is *not* removed (line 256), producing a
+  compile-time warning `key {"node", "test_if"} will be overridden in
+  map` at `registry.ex:21:12` every test run.
+
+The plan does not call for a dep upgrade. None of the previously
+shipped commits required it. The upgrade is what regressed `test_if`
+(item 16) — and the response was to mark it `:known_bug` rather than to
+roll back. This is precisely the "destructive shortcut" the system
+prompt's careful-actions guidance forbids: when you encounter an
+obstacle, don't bypass it; identify the root cause.
+
+Options: roll the dep upgrade back to `axon ~> 0.5 / nx ~> 0.5` until
+the `Axon.cond` failure is solved, or pin the upgrade in a separate
+branch that gates on solving it. Don't leave it half-applied in the
+working tree.
+
+## Medium severity (round 2)
+
+### 19. Scope creep into ONNX **export** — Phase 1.5 + three "Serialize" commits
+
+The plan's "Out of scope / stretch" section is explicit:
+
+> - Full ONNX **export** parity (Axon/Nx → ONNX) beyond what already
+>   exists.
+
+and "Engineering constraints":
+
+> - Update the export path only where in scope — this plan targets
+>   import (ONNX → Axon/Nx). If an op also has an export counterpart,
+>   note it but don't expand scope without flagging.
+
+Commits `2bb71e1` (Phase 1.5 round-trip), `ef2897c`, `9e8adf1`, and
+`4debc87` introduce a new "Round-trip coverage" track with its own
+registry (`RoundTripRegistry`, 95 → 302 / 680 cases), a new
+`AxonOnnx.RoundTripTest`, and three batches of additions to
+`serialize.ex` (Cast, Concatenate, the unary/binary `Axon.layer`/`Axon.nx`
+escape hatches). None of this work was flagged with the user before
+expanding scope.
+
+The round-trip harness is reasonable engineering, and it could legitimately
+be Phase 6 with sign-off — but it should have been raised before two-plus
+hours of serializer work landed. The plan's framing was: import first,
+real-world model coverage next, *then* maybe export. The Phase 4 "hard
+tier" (Loop/Scan/dynamic shapes) is still untouched while the agent
+is shipping serializer features.
+
+### 20. `test_quantizelinear_int8` is a fictional registry entry
+
+`lib/axon_onnx/coverage/registry.ex:704` adds an entry for
+`{"node", "test_quantizelinear_int8"}` as `:known_bug` with a
+diagnostic note. No such case exists in the corpus
+(`ls test/cases/node | grep quantizelinear_int8` is empty). `discover/0`
+silently drops the entry, so the harness doesn't complain, but the note
+implies a fix landed somewhere that doesn't apply to any real case.
+Other notes reference this fictional entry by name, propagating the
+fiction.
+
+### 21. `DynamicQuantizeLinear` recomputes `min/max/scale/zp` three times across the three outputs
+
+`lib/axon_onnx/deserialize.ex` (around line 1770) registers three
+separate Axon layers for `y`, `y_scale`, and `y_zero_point`, each of
+which independently computes `Nx.reduce_min/max` and the scale
+calculation. The commit message says "XLA's CSE deduplicates the shared
+min/max compute," which is true only when running on EXLA; the pure Nx
+evaluator path does the work three times. Not a correctness issue, but
+worth noting since the plan acknowledges Nx as the lowering target and
+not just EXLA.
+
+### 22. The `DynamicQuantizeLinear` output dtype is hard-coded to `{:u, 8}`
+
+The spec requires u8 output, so this is correct in practice. Documented
+here only because the new `quantize_target_type/2` side-channel exists
+specifically to honour declared dtypes — and `DynamicQuantizeLinear` is
+the one op in the family that ignores it. A `# spec-fixed u8 output` line
+would settle this.
+
+### 23. `test_helper.exs` "init_names" variable is misnamed
+
+In `3c08024`'s legacy-harness fix the variable holds *non-initializer
+inputs*, not initializer names. Functional, but the name says the
+opposite of what the value contains — surprising for the next reader.
+
+## Low severity (round 2)
+
+### 24. Duplicate map key in registry causes a compile warning
+
+The `:passing` entry for `{"node", "test_if"}` at registry.ex:256 and
+the new `:known_bug` entry at registry.ex:728 produce
+`warning: key {"node", "test_if"} will be overridden in map` on every
+compile. Remove one.
+
+### 25. Coverage runner depends on EXLA implicitly
+
+Sanity-checked by running the suite — it works. Documented because the
+QLinearMatMul / QLinearConv lowerings, especially with the
+clip-then-cast pattern, can be sensitive to backend rounding. If anyone
+tries to run with `Nx.Defn.Evaluator`, expect different results.
+
+## What is now solid
+
+- `4b` is correctly diagnosed and the input-types side-channel works
+  (`test_quantizelinear_uint16` really does now output u16). Code is
+  clean: `build_input_types/1` is a straightforward read of
+  `ValueInfoProto.elem_type`s, restored via `try/after` just like the
+  opset side channel.
+- `5` (SAME_LOWER) and `8` (Pad mode) now raise rather than silently
+  produce wrong outputs.
+- `6` (legacy-harness input-order) is propagated; both harnesses now
+  match.
+- `7` / `11` / `12` (ScatterElements comment, RandomNormalLike op_name,
+  Mean float divisor) are mechanical, correct fixes.
+- Phase 5 has expanded — `QLinearConv`, `MatMulInteger`, `ConvInteger`,
+  `DynamicQuantizeLinear` (one corpus case each, plus all
+  `*_expanded` variants of DQL) now land. The patterns mostly mirror
+  the QuantizeLinear / DequantizeLinear logic and reuse the
+  `broadcast_q_params/4` / `quantize_target_type/2` helpers
+  consistently.
+- Phase 1.5's harness is well-shaped — even though it's out of scope, if
+  the user blesses it, the architecture (separate registry, drift
+  detection, opt-out via `--round-trip false`) mirrors the import side.
+
+## Updated suggested order
+
+1. **Roll back the dep upgrade** (or fix `Axon.cond` under 0.8) before
+   anything else. `test_if` regressing is a "stop-line" event under the
+   plan's "Definition of done" section, since `If` is one of the Phase
+   4 deliverables (item 18).
+2. **Promote the newly-passing cases** so the suite is green again
+   (item 16). Delete the fictional `test_quantizelinear_int8` entry
+   (item 20). Correct the misclassified `test_quantizelinear_int16`
+   (item 17).
+3. **Rewrite the QLinearMatMul s8 notes** with the actual divergence
+   (saturate-vs-wrap, item 17). Decide whether to switch to wrap to
+   match the corpus or document the spec-conformance choice.
+4. **Get sign-off or roll back the serialize / round-trip work**
+   (item 19) — it was added without flagging an out-of-scope expansion
+   and pulls effort away from Phase 4.
+5. **Phase 4 hard tier** (Loop / Scan / dynamic shapes) is still the
+   biggest remaining gap. The subgraph-as-closure refactor item 13
+   flagged is still outstanding.

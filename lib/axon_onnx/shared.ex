@@ -227,8 +227,15 @@ defmodule AxonOnnx.Shared do
       |> Axon.dense(units, name: output_name)
       |> Axon.multiply(Axon.constant(alpha, name: "gemm_alpha"))
     else
-      kernel_param = Axon.param("kernel", &Axon.Shape.dense_kernel(&1, units))
-      bias_param = Axon.param("bias", &Axon.Shape.dense_bias(&1, units))
+      # Axon 0.8 dropped Axon.Shape.dense_kernel/2 + Axon.Shape.dense_bias/2;
+      # inline the shape formulas. Kernel: {input_last_dim, units}. Bias: {units}.
+      kernel_param =
+        Axon.param("kernel", fn input_shape ->
+          last = elem(input_shape, tuple_size(input_shape) - 1)
+          {last, units}
+        end)
+
+      bias_param = Axon.param("bias", fn _ -> {units} end)
       alpha = Nx.backend_copy(alpha, Nx.Defn.Expr)
       beta = Nx.backend_copy(beta, Nx.Defn.Expr)
 

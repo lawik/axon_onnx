@@ -66,12 +66,18 @@ defmodule AxonOnnx.Serialize do
           output_name_fn.(op, op_counts)
       end
 
-    output_shape = Axon.get_output_shape(axon, templates)
+    # Axon 0.8 returns a template tensor here, not a shape tuple. Extract
+    # the shape.
+    output_shape = Axon.get_output_shape(axon, templates) |> Nx.shape()
 
-    # Flatten params_or_initializers so it's no longer nested
-    # TODO: This is going to be expensive, find a better way
+    # Flatten params_or_initializers so it's no longer nested.
+    # Axon 0.8 wraps params in %Axon.ModelState{data: %{layer_name => %{param => tensor}}};
+    # earlier versions used a plain map. Normalise to the inner map first.
     params_or_initializers =
-      params_or_initializers
+      case params_or_initializers do
+        %Axon.ModelState{data: data} -> data
+        map when is_map(map) -> map
+      end
       |> Enum.reduce(%{}, fn {layer_name, params}, acc ->
         params
         |> Enum.reduce(acc, fn {param_name, v}, acc ->
@@ -509,9 +515,14 @@ defmodule AxonOnnx.Serialize do
         }
 
         constant_name = name <> "_squeeze_axes"
-        shape = Axon.get_output_shape(%Axon{output: inp_id, nodes: nodes_map}, templates)
+        # Axon 0.8 returns a template; resolve to shape tuple.
+        shape =
+          Axon.get_output_shape(%Axon{output: inp_id, nodes: nodes_map}, templates)
+          |> Nx.shape()
+
         axes = Enum.to_list(2..(Nx.rank(shape) - 1)//1)
-        axes_tensor = nx_to_tensor_proto(constant_name, Nx.tensor(axes))
+        # ONNX Squeeze requires int64 for its axes input.
+        axes_tensor = nx_to_tensor_proto(constant_name, Nx.tensor(axes, type: {:s, 64}))
         value_attr = to_attr("value", :TENSOR, axes_tensor)
 
         constant_node = %Node{
@@ -572,8 +583,15 @@ defmodule AxonOnnx.Serialize do
          op_counts,
          cache
        ) do
-    %Axon.Node{op: :container, parent: [children_tuple]} = nodes_map[container_id]
-    child_ids = Tuple.to_list(children_tuple)
+    child_ids =
+      case nodes_map[container_id] do
+        %Axon.Node{op: :container, parent: [children_tuple]} ->
+          Tuple.to_list(children_tuple)
+
+        %Axon.Node{parent: ids} when is_list(ids) ->
+          ids
+      end
+
     axis = Keyword.fetch!(opts, :axis)
 
     {inputs, param_names, nodes, op_counts, cache} =
@@ -657,9 +675,9 @@ defmodule AxonOnnx.Serialize do
   ## Arithmetic binary ops (Axon.add / Axon.subtract / Axon.multiply)
 
   # These are produced by `Axon.add/2`, `Axon.subtract/2`, `Axon.multiply/2`,
-  # which wrap their two inputs in an `Axon.container({a, b})` and create a
-  # single-parent atom op (:add / :subtract / :multiply). Resolve the
-  # container's tuple of children and emit an ONNX Add/Sub/Mul.
+  # which in Axon 0.5 wrapped their two inputs in an `Axon.container({a, b})`
+  # but in Axon 0.8 wrap via `Axon.restructure/2` whose parent is a 2-element
+  # list of input ids. Both forms are unwrapped here.
   @axon_arithmetic_to_onnx %{add: "Add", subtract: "Sub", multiply: "Mul"}
 
   defp to_onnx(
@@ -675,8 +693,14 @@ defmodule AxonOnnx.Serialize do
        when is_map_key(@axon_arithmetic_to_onnx, op) do
     onnx_op = Map.fetch!(@axon_arithmetic_to_onnx, op)
 
-    %Axon.Node{op: :container, parent: [children_tuple]} = nodes_map[container_id]
-    [a_id, b_id] = Tuple.to_list(children_tuple)
+    [a_id, b_id] =
+      case nodes_map[container_id] do
+        %Axon.Node{op: :container, parent: [children_tuple]} ->
+          Tuple.to_list(children_tuple)
+
+        %Axon.Node{parent: [a, b]} ->
+          [a, b]
+      end
 
     {inputs, param_names, nodes, op_counts, cache} =
       to_onnx(nodes_map[a_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
@@ -1033,16 +1057,7 @@ defmodule AxonOnnx.Serialize do
 
   defp nx_to_tensor_proto(param_name, tensor) do
     dims = Nx.shape(tensor) |> Tuple.to_list()
-    # TODO: fix
-    data_type =
-      case Nx.type(tensor) do
-        {:f, 32} ->
-          1
-
-        {:s, 64} ->
-          7
-      end
-
+    data_type = nx_type_to_onnx_type(Nx.type(tensor))
     raw_data = Nx.to_binary(tensor)
     %Onnx.TensorProto{name: param_name, dims: dims, data_type: data_type, raw_data: raw_data}
   end
