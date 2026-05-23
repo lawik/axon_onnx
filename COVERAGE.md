@@ -7,8 +7,8 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 543 | 30.3% |
-| unsupported | 1250 | 69.7% |
+| passing | 581 | 32.4% |
+| unsupported | 1212 | 67.6% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -17,8 +17,8 @@ Total cases: **1793**
 
 **node** — 1653 cases
 
-- passing: 450
-- unsupported: 1203
+- passing: 488
+- unsupported: 1165
 
 **pytorch-converted** — 82 cases
 
@@ -130,7 +130,7 @@ A case using N distinct ops contributes to N rows.
 | LRN | 2 | 2 | 0 | 0 | 0 | 0 |
 | LSTM | 4 | 0 | 4 | 0 | 0 | 0 |
 | LabelEncoder | 4 | 0 | 4 | 0 | 0 | 0 |
-| LayerNormalization | 19 | 0 | 19 | 0 | 0 | 0 |
+| LayerNormalization | 19 | 19 | 0 | 0 | 0 | 0 |
 | LeakyRelu | 5 | 5 | 0 | 0 | 0 | 0 |
 | Less | 53 | 42 | 11 | 0 | 0 | 0 |
 | LessOrEqual | 8 | 8 | 0 | 0 | 0 | 0 |
@@ -167,7 +167,7 @@ A case using N distinct ops contributes to N rows.
 | QLinearConv | 1 | 0 | 1 | 0 | 0 | 0 |
 | QLinearMatMul | 8 | 0 | 8 | 0 | 0 | 0 |
 | QuantizeLinear | 16 | 0 | 16 | 0 | 0 | 0 |
-| RMSNormalization | 19 | 0 | 19 | 0 | 0 | 0 |
+| RMSNormalization | 19 | 19 | 0 | 0 | 0 | 0 |
 | RNN | 4 | 0 | 4 | 0 | 0 | 0 |
 | RandomUniformLike | 3 | 0 | 3 | 0 | 0 | 0 |
 | Range | 42 | 0 | 42 | 0 | 0 | 0 |

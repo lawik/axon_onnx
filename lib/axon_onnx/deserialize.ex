@@ -1233,6 +1233,106 @@ defmodule AxonOnnx.Deserialize do
   end
 
   defp recur_nodes(
+         %Node{
+           op_type: "LayerNormalization",
+           attribute: attrs,
+           input: inputs,
+           output: outputs
+         },
+         {axon, params, used_params}
+       ) do
+    # ONNX LayerNormalization (opset 17+) normalises over axes
+    # [axis, axis+1, …, rank-1]. axis defaults to -1 (the last axis), which
+    # matches Axon.layer_norm's channel_index, but axis=0 means
+    # "normalise over the whole tensor" — Axon's layer doesn't directly
+    # express that, so we lower to raw Nx ops here. Bias is optional.
+    # When the model also requests Mean / InvStdDev outputs (their proto
+    # names follow Y), register them as separate Axon layers; XLA's CSE
+    # will deduplicate the shared mean/variance compute.
+    options = options!(attrs)
+    axis = options["axis"] || -1
+    epsilon = options["epsilon"] || 1.0e-5
+
+    {input_name, scale_name, bias_name} =
+      case inputs do
+        [i, s] -> {i, s, nil}
+        [i, s, b] -> {i, s, b}
+      end
+
+    input = input!(input_name, axon, params, used_params)
+    scale = input!(scale_name, axon, params, used_params)
+    bias = if bias_name, do: input!(bias_name, axon, params, used_params), else: nil
+
+    {y_fun, y_inputs} =
+      case bias do
+        nil ->
+          {fn x, s, _opts -> do_layer_norm(x, s, nil, axis, epsilon) end, [input, scale]}
+
+        _ ->
+          {fn x, s, b, _opts -> do_layer_norm(x, s, b, axis, epsilon) end,
+           [input, scale, bias]}
+      end
+
+    y_name = hd(outputs)
+    y_layer = Axon.layer(y_fun, y_inputs, name: y_name, op_name: :layer_norm)
+    axon = Map.put(axon, y_name, y_layer)
+
+    axon =
+      outputs
+      |> Enum.with_index()
+      |> Enum.reduce(axon, fn
+        {_y, 0}, acc ->
+          acc
+
+        {mean_name, 1}, acc ->
+          fun = fn x, _opts -> do_layer_norm_mean(x, axis) end
+          layer = Axon.layer(fun, [input], name: mean_name, op_name: :layer_norm_mean)
+          Map.put(acc, mean_name, layer)
+
+        {inv_std_name, 2}, acc ->
+          fun = fn x, _opts -> do_layer_norm_inv_std(x, axis, epsilon) end
+          layer =
+            Axon.layer(fun, [input], name: inv_std_name, op_name: :layer_norm_inv_std)
+
+          Map.put(acc, inv_std_name, layer)
+      end)
+
+    {axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "RMSNormalization",
+           attribute: attrs,
+           input: [input_name, scale_name],
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # RMSNormalization (opset 23+): Y = (X * rsqrt(mean(X^2, axes) + epsilon)) * Scale.
+    # No mean-centering, no bias — strictly the LLM-favoured normalisation.
+    options = options!(attrs)
+    axis = options["axis"] || -1
+    epsilon = options["epsilon"] || 1.0e-5
+
+    input = input!(input_name, axon, params, used_params)
+    scale = input!(scale_name, axon, params, used_params)
+
+    fun = fn x, s, _opts ->
+      rank = Nx.rank(x)
+      pos_axis = if axis < 0, do: rank + axis, else: axis
+      axes = Enum.to_list(pos_axis..(rank - 1)//1)
+      mean_sq = Nx.mean(Nx.pow(x, 2), axes: axes, keep_axes: true)
+      inv_rms = Nx.rsqrt(Nx.add(mean_sq, epsilon))
+      Nx.multiply(Nx.multiply(x, inv_rms), s)
+    end
+
+    layer = Axon.layer(fun, [input, scale], name: output_name, op_name: :rms_norm)
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
          %Node{op_type: "Concat", attribute: attrs, input: inputs, output: [output_name]},
          {axon, params, used_params}
        ) do
@@ -2654,6 +2754,39 @@ defmodule AxonOnnx.Deserialize do
         layer = Axon.layer(fun, [inp], name: output_name, op_name: :trilu)
         {Map.put(axon, output_name, layer), params, used_params}
     end
+  end
+
+  defp do_layer_norm(x, scale, bias, axis, epsilon) do
+    {y, _mean, _inv_std} = layer_norm_parts(x, axis, epsilon)
+    y = Nx.multiply(y, scale)
+
+    if bias do
+      Nx.add(y, bias)
+    else
+      y
+    end
+  end
+
+  defp do_layer_norm_mean(x, axis) do
+    {_y, mean, _inv_std} = layer_norm_parts(x, axis, 0.0)
+    mean
+  end
+
+  defp do_layer_norm_inv_std(x, axis, epsilon) do
+    {_y, _mean, inv_std} = layer_norm_parts(x, axis, epsilon)
+    inv_std
+  end
+
+  defp layer_norm_parts(x, axis, epsilon) do
+    rank = Nx.rank(x)
+    pos_axis = if axis < 0, do: rank + axis, else: axis
+    axes = Enum.to_list(pos_axis..(rank - 1)//1)
+
+    mean = Nx.mean(x, axes: axes, keep_axes: true)
+    centered = Nx.subtract(x, mean)
+    var = Nx.mean(Nx.pow(centered, 2), axes: axes, keep_axes: true)
+    inv_std = Nx.rsqrt(Nx.add(var, epsilon))
+    {Nx.multiply(centered, inv_std), mean, inv_std}
   end
 
   defp do_trilu(x, k, upper) do
