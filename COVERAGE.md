@@ -13,6 +13,21 @@ Total cases: **1793**
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
+## Round-trip coverage
+
+Of the 673 cases that import cleanly, how many also export back to
+ONNX and re-import with matching predictions (the full bidirectional
+Nx/Axon ⇄ ONNX path).
+
+| Classification | Count | % of import-passing |
+|---|---|---|
+| passing | 95 | 14.1% |
+| unsupported | 578 | 85.9% |
+| known_bug | 0 | 0.0% |
+| newly_passing | 0 | 0.0% |
+| regression | 0 | 0.0% |
+
+
 ## Per-category breakdown
 
 **node** — 1653 cases

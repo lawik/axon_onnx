@@ -184,3 +184,35 @@ number as the starting point.
 - Tensor dtype coverage in `tensor!/1` already handles f32/f16/bf16/f64,
   u8/16/32/64, s8/16/32/64; `string`/complex types raise. That's a fine
   starting point for Phase 5's type-constraint work.
+
+## 6. What's tested vs. what's deliberately excluded
+
+The Phase 1 framework runs the **entire** local corpus — nothing is skipped
+silently. `mix test` does still report `(76 excluded)` because the existing
+test files tag three legacy suites and `test_helper.exs:7` excludes those
+tags by default:
+
+- **`:real`** — three full pretrained ONNX models (`densenet121`, `resnet50`,
+  `shufflenet`). The test helper downloads them on demand from a URL in
+  `test/cases/real/<test>/data.json`, then runs them through the import
+  comparison. The exclusion exists because these are ~100MB each and the
+  download/extract is slow + network-dependent. Opt-in locally with
+  `mix test --include real`. The `data.json` files are not checked in for
+  the current set; the tests would need URLs populated before they run.
+- **`:torchvision`** — TorchVision model exports via Python. Excluded for
+  the same reason plus a Python `torchvision` dependency.
+- **`:transformers`** — Hugging Face transformer exports via
+  `python -m transformers.onnx`. Excluded for network + `transformers`
+  package fragility (per the maintainers' inline comment).
+
+The exclusions are about *infrastructure*, not coverage hiding. For
+day-to-day bidirectional verification we now have:
+
+- **Import coverage**: every local corpus case → `AxonOnnx.CoverageTest`
+  (registry-driven).
+- **Export coverage**: every synthetic Axon model in `SerializeTest`
+  exported and round-tripped through `scripts/check_onnx_model.py` + onnxruntime.
+- **Round-trip coverage** (Phase 1.5): every import-passing case re-exported
+  via `AxonOnnx.dump/4` and re-imported via `AxonOnnx.load/2`, with the two
+  predictions compared. Driven by `AxonOnnx.Coverage.RoundTripRegistry` and
+  reported as a separate section in `COVERAGE.md`.

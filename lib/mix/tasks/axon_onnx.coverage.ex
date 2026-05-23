@@ -26,17 +26,19 @@ defmodule Mix.Tasks.AxonOnnx.Coverage do
   use Mix.Task
 
   alias AxonOnnx.Coverage
+  alias AxonOnnx.Coverage.RoundTripRegistry
 
   @impl Mix.Task
   def run(argv) do
     {opts, _, _} =
       OptionParser.parse(argv,
-        strict: [category: :keep, write: :string],
+        strict: [category: :keep, write: :string, round_trip: :boolean],
         aliases: [c: :category]
       )
 
     categories = Keyword.get_values(opts, :category)
     write? = Keyword.get(opts, :write, "true") != "false"
+    round_trip? = Keyword.get(opts, :round_trip, true)
 
     Mix.Task.run("app.start")
 
@@ -52,15 +54,52 @@ defmodule Mix.Tasks.AxonOnnx.Coverage do
       :ok
     else
       results = Enum.map(cases, &classify/1)
-      report = render_report(results)
+
+      round_trip_results =
+        if round_trip?, do: round_trip_summary(results), else: nil
+
+      report = render_report(results, round_trip_results)
 
       if write? do
         File.write!("COVERAGE.md", report)
-        Mix.shell().info("Wrote COVERAGE.md (#{length(results)} cases).")
+        Mix.shell().info(
+          "Wrote COVERAGE.md (#{length(results)} cases" <>
+            if(round_trip_results, do: ", #{round_trip_results.checked} round-trip", else: "") <>
+            ")."
+        )
       else
         Mix.shell().info(report)
       end
     end
+  end
+
+  defp round_trip_summary(results) do
+    candidates =
+      results
+      |> Enum.filter(fn r -> r.classification == :passing end)
+
+    counts =
+      Enum.frequencies_by(candidates, fn r ->
+        registry_status = RoundTripRegistry.status({r.category, r.name})
+        actual = Coverage.run_round_trip(%{
+          category: r.category,
+          name: r.name,
+          path: Path.join([Coverage.cases_root(), r.category, r.name])
+        })
+
+        case {registry_status, actual} do
+          {:passing, :ok} -> :passing
+          {:passing, {:error, _}} -> :regression
+          {_, :ok} -> :newly_passing
+          {_, {:error, _}} -> :unsupported
+        end
+      end)
+
+    %{
+      checked: length(candidates),
+      counts: counts,
+      total_import_passing: length(candidates)
+    }
   end
 
   defp classify(entry) do
@@ -91,7 +130,7 @@ defmodule Mix.Tasks.AxonOnnx.Coverage do
     }
   end
 
-  defp render_report(results) do
+  defp render_report(results, round_trip_results) do
     total = length(results)
     counts = Enum.frequencies_by(results, & &1.classification)
 
@@ -112,6 +151,7 @@ defmodule Mix.Tasks.AxonOnnx.Coverage do
 
     per_op = render_per_op(results)
     registry_drift = render_drift(results)
+    round_trip_section = render_round_trip_section(round_trip_results)
 
     """
     # ONNX Coverage
@@ -125,6 +165,8 @@ defmodule Mix.Tasks.AxonOnnx.Coverage do
     |---|---|---|
     #{summary_rows}
 
+    #{round_trip_section}
+
     ## Per-category breakdown
 
     #{per_category}
@@ -137,6 +179,32 @@ defmodule Mix.Tasks.AxonOnnx.Coverage do
     #{per_op}
 
     #{registry_drift}
+    """
+  end
+
+  defp render_round_trip_section(nil), do: ""
+
+  defp render_round_trip_section(%{checked: 0}), do: ""
+
+  defp render_round_trip_section(%{checked: total, counts: counts}) do
+    rows =
+      for status <- [:passing, :unsupported, :known_bug, :newly_passing, :regression] do
+        count = Map.get(counts, status, 0)
+        pct = if total > 0, do: Float.round(100 * count / total, 1), else: 0.0
+        "| #{status} | #{count} | #{pct}% |"
+      end
+      |> Enum.join("\n")
+
+    """
+    ## Round-trip coverage
+
+    Of the #{total} cases that import cleanly, how many also export back to
+    ONNX and re-import with matching predictions (the full bidirectional
+    Nx/Axon ⇄ ONNX path).
+
+    | Classification | Count | % of import-passing |
+    |---|---|---|
+    #{rows}
     """
   end
 

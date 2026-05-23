@@ -117,6 +117,79 @@ defmodule AxonOnnx.Coverage do
     end
   end
 
+  @doc """
+  Runs a single case end-to-end through the full round-trip:
+
+  * import the corpus model and its golden inputs
+  * predict with the imported model → `out_a`
+  * export the imported model back to ONNX bytes
+  * re-import the exported bytes
+  * predict with the re-imported model → `out_b`
+  * verify `out_a` and `out_b` are within tolerance (and that both match the
+    golden output supplied by the corpus)
+
+  This is the bidirectional Nx/Axon ⇄ ONNX conformance check: it fails if
+  either path is broken or if a round-trip loses information.
+
+  Returns `:ok` or `{:error, reason}`, never raises. Cases where the initial
+  import doesn't succeed return `{:error, "import: ..."}` so callers can
+  distinguish import-only failures from round-trip failures.
+  """
+  @spec run_round_trip(case_entry(), keyword()) :: run_result()
+  def run_round_trip(%{path: path} = entry, opts \\ []) do
+    atol = Keyword.get(opts, :atol, 1.0e-3)
+    model_path = Path.join(path, "model.onnx")
+    data_paths = path |> Path.join("test_data_set_*") |> Path.wildcard() |> Enum.sort()
+
+    try do
+      {model_a, params_a} = AxonOnnx.import(model_path)
+      proto_input_names = proto_input_names(model_path)
+
+      input_templates =
+        model_a
+        |> Axon.get_inputs()
+        |> Map.new(fn {k, shape} -> {k, Nx.template(shape, {:f, 32})} end)
+
+      bytes = AxonOnnx.dump(model_a, input_templates, params_a) |> IO.iodata_to_binary()
+      {model_b, params_b} = AxonOnnx.load(bytes)
+
+      Enum.each(data_paths, fn data_path ->
+        input_paths = data_path |> Path.join("input_*.pb") |> Path.wildcard() |> Enum.sort()
+
+        inp_tensors =
+          input_paths
+          |> Enum.map(&pb_to_tensor/1)
+          |> Enum.zip(proto_input_names)
+          |> Map.new(fn {v, k} -> {k, v} end)
+
+        out_a = Axon.predict(model_a, params_a, inp_tensors)
+        out_b = Axon.predict(model_b, params_b, inp_tensors)
+
+        assert_round_trip_close!(out_a, out_b, entry, atol)
+      end)
+
+      :ok
+    rescue
+      e -> {:error, normalize_error(e)}
+    catch
+      kind, value -> {:error, "caught #{inspect(kind)}: #{inspect(value)}"}
+    end
+  end
+
+  defp assert_round_trip_close!(a, b, entry, atol)
+       when is_tuple(a) and is_tuple(b) do
+    Enum.zip(Tuple.to_list(a), Tuple.to_list(b))
+    |> Enum.each(fn {x, y} -> assert_round_trip_close!(x, y, entry, atol) end)
+  end
+
+  defp assert_round_trip_close!(a, b, entry, atol) do
+    res = Nx.all_close(a, b, atol: atol, equal_nan: true) |> Nx.to_number()
+
+    if res != 1 do
+      raise "#{entry.category}/#{entry.name}: round-trip diverges (atol=#{atol})"
+    end
+  end
+
   defp assert_close!(actual, expected, entry, atol) do
     res = Nx.all_close(actual, expected, atol: atol, equal_nan: true) |> Nx.to_number()
 
