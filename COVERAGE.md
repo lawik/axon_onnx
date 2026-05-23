@@ -7,22 +7,22 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 689 | 38.4% |
+| passing | 690 | 38.5% |
 | unsupported | 1100 | 61.3% |
-| known_bug | 4 | 0.2% |
+| known_bug | 3 | 0.2% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 ## Round-trip coverage
 
-Of the 689 cases that import cleanly, how many also export back to
+Of the 690 cases that import cleanly, how many also export back to
 ONNX and re-import with matching predictions (the full bidirectional
 Nx/Axon ⇄ ONNX path).
 
 | Classification | Count | % of import-passing |
 |---|---|---|
-| passing | 308 | 44.7% |
-| unsupported | 381 | 55.3% |
+| passing | 308 | 44.6% |
+| unsupported | 382 | 55.4% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -32,9 +32,9 @@ Nx/Axon ⇄ ONNX path).
 
 **node** — 1653 cases
 
-- passing: 589
+- passing: 590
 - unsupported: 1060
-- known_bug: 4
+- known_bug: 3
 
 **pytorch-converted** — 82 cases
 
@@ -138,7 +138,7 @@ A case using N distinct ops contributes to N rows.
 | HardSwish | 1 | 1 | 0 | 0 | 0 | 0 |
 | Hardmax | 7 | 7 | 0 | 0 | 0 | 0 |
 | Identity | 102 | 6 | 96 | 0 | 0 | 0 |
-| If | 7 | 0 | 6 | 1 | 0 | 0 |
+| If | 7 | 1 | 6 | 0 | 0 | 0 |
 | ImageDecoder | 9 | 0 | 9 | 0 | 0 | 0 |
 | InstanceNormalization | 3 | 0 | 3 | 0 | 0 | 0 |
 | IsInf | 4 | 2 | 2 | 0 | 0 | 0 |

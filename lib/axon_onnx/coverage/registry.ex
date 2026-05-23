@@ -723,11 +723,7 @@ defmodule AxonOnnx.Coverage.Registry do
          "scale/divide step before requantisation."},
     {"node", "test_convinteger_with_padding"} =>
       {:known_bug, "ConvInteger with non-zero padding diverges from golden."},
-    {"node", "test_if"} =>
-      {:known_bug,
-       "Axon 0.8 + Nx 0.12: Nx.Defn.Tree.scope_ids_each raises on " <>
-         "Nx.Tensor in Axon.cond branches. Worked under 0.5; needs " <>
-         "upstream fix or different subgraph encoding."}
+    {"node", "test_if"} => {:passing, nil}
   }
 
   @doc "Returns the raw `{category, name} => {status, note}` map."

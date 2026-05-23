@@ -2621,11 +2621,20 @@ defmodule AxonOnnx.Deserialize do
          {axon, params, used_params}
        ) do
     # ONNX If takes a bool scalar condition plus two subgraphs as attributes.
-    # Each subgraph is recursively deserialised via graph_to_axon/2. Axon.cond
-    # requires the cond_fn to return a scalar bool tensor — the dispatch above
-    # only guarantees the input is some numeric scalar (in practice the bool
-    # elem_type, but Axon discards declared dtype on graph inputs), so we map
-    # through Nx.not_equal/2 to coerce to bool semantics.
+    # Each subgraph is recursively deserialised via graph_to_axon/2. There
+    # are two paths here because Axon.cond under Nx 0.12 raises
+    # Nx.Defn.Tree.scope_ids_each on raw Nx.Tensor constants in branches
+    # (see test_if).
+    #
+    # Path A (closed branches — no graph inputs): pre-evaluate both
+    # subgraphs to concrete tensors and Nx.select between them inside a
+    # plain Axon.layer. This sidesteps Axon.cond's defn-trace issue and
+    # covers test_if (both branches are just Constant ops).
+    #
+    # Path B (open branches): fall back to Axon.cond, which is correct for
+    # Nx 0.5 and remains useful for the simpler cond patterns even under
+    # 0.12. The proper general-case fix is subgraph-as-closure
+    # deserialisation (Phase 4 deliverable), which also unblocks Loop/Scan.
     cond_options = options!(attrs)
 
     inp = axon!(input, axon)
@@ -2633,22 +2642,55 @@ defmodule AxonOnnx.Deserialize do
     else_branch = cond_options["else_branch"]
     then_branch = cond_options["then_branch"]
 
-    # TODO: Don't match
     {[else_graph], else_params} = graph_to_axon(else_branch, [])
     {[then_graph], then_params} = graph_to_axon(then_branch, [])
-
-    updated_axon =
-      outputs
-      |> Enum.reduce(axon, fn out_name, axon ->
-        Map.put(axon, out_name, Axon.cond(inp, &Nx.not_equal(&1, 0), then_graph, else_graph))
-      end)
 
     updated_params =
       else_params
       |> Map.merge(then_params)
       |> Map.merge(used_params)
 
+    updated_axon =
+      cond do
+        closed_subgraph?(else_branch) and closed_subgraph?(then_branch) ->
+          # Both branches independent of any graph input. Compute both
+          # values eagerly, then pick at runtime via Nx.select.
+          else_value = eval_closed_subgraph(else_graph, else_params)
+          then_value = eval_closed_subgraph(then_graph, then_params)
+
+          fun = fn pred, _opts ->
+            mask = Nx.not_equal(pred, 0)
+            Nx.select(mask, then_value, else_value)
+          end
+
+          Enum.reduce(outputs, axon, fn out_name, acc ->
+            layer = Axon.layer(fun, [inp], name: out_name, op_name: :if_closed)
+            Map.put(acc, out_name, layer)
+          end)
+
+        true ->
+          # Open-branch fallback: Axon.cond. May fail under Nx 0.12 with
+          # constants inside branches; the test_if registry entry covers
+          # that for now.
+          Enum.reduce(outputs, axon, fn out_name, acc ->
+            Map.put(
+              acc,
+              out_name,
+              Axon.cond(inp, &Nx.not_equal(&1, 0), then_graph, else_graph)
+            )
+          end)
+      end
+
     {updated_axon, params, updated_params}
+  end
+
+  defp closed_subgraph?(%Onnx.GraphProto{input: inputs}), do: inputs == []
+  defp closed_subgraph?(nil), do: false
+
+  defp eval_closed_subgraph(%Axon{} = axon, params) do
+    {_init, predict} = Axon.build(axon)
+    model_state = Axon.ModelState.new(params)
+    predict.(model_state, %{}) |> Nx.backend_copy(Nx.BinaryBackend)
   end
 
   defp recur_nodes(
