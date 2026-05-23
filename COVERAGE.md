@@ -7,8 +7,8 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 669 | 37.3% |
-| unsupported | 1124 | 62.7% |
+| passing | 673 | 37.5% |
+| unsupported | 1120 | 62.5% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -17,8 +17,8 @@ Total cases: **1793**
 
 **node** — 1653 cases
 
-- passing: 575
-- unsupported: 1078
+- passing: 579
+- unsupported: 1074
 
 **pytorch-converted** — 82 cases
 
@@ -165,7 +165,7 @@ A case using N distinct ops contributes to N rows.
 | Pad | 18 | 2 | 16 | 0 | 0 | 0 |
 | Pow | 17 | 15 | 2 | 0 | 0 | 0 |
 | QLinearConv | 1 | 0 | 1 | 0 | 0 | 0 |
-| QLinearMatMul | 8 | 0 | 8 | 0 | 0 | 0 |
+| QLinearMatMul | 8 | 4 | 4 | 0 | 0 | 0 |
 | QuantizeLinear | 16 | 5 | 11 | 0 | 0 | 0 |
 | RMSNormalization | 19 | 19 | 0 | 0 | 0 | 0 |
 | RNN | 4 | 0 | 4 | 0 | 0 | 0 |

@@ -1496,6 +1496,76 @@ defmodule AxonOnnx.Deserialize do
 
   defp recur_nodes(
          %Node{
+           op_type: "QLinearMatMul",
+           input: [a_n, a_scale_n, a_zp_n, b_n, b_scale_n, b_zp_n, y_scale_n, y_zp_n],
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # QLinearMatMul = dequantize(a, b) → MatMul → quantize(y_scale, y_zp).
+    # All eight inputs are taken; y_zero_point's dtype defines the output
+    # type. Supports rank 2 (plain) and rank 3+ (batched) inputs via
+    # Nx.dot with explicit batch and contract axes.
+    a = input!(a_n, axon, params, used_params)
+    a_scale = input!(a_scale_n, axon, params, used_params)
+    a_zp = input!(a_zp_n, axon, params, used_params)
+    b = input!(b_n, axon, params, used_params)
+    b_scale = input!(b_scale_n, axon, params, used_params)
+    b_zp = input!(b_zp_n, axon, params, used_params)
+    y_scale = input!(y_scale_n, axon, params, used_params)
+    y_zp = input!(y_zp_n, axon, params, used_params)
+
+    target_type = quantize_target_type(y_zp)
+    {min_v, max_v} = quantize_range(target_type)
+
+    fun = fn a, a_scale, a_zp, b, b_scale, b_zp, y_scale, y_zp, _opts ->
+      work_type = Nx.type(a_scale)
+
+      a_f =
+        Nx.multiply(
+          Nx.subtract(Nx.as_type(a, work_type), Nx.as_type(a_zp, work_type)),
+          a_scale
+        )
+
+      b_f =
+        Nx.multiply(
+          Nx.subtract(Nx.as_type(b, work_type), Nx.as_type(b_zp, work_type)),
+          b_scale
+        )
+
+      y_f =
+        case Nx.rank(a) do
+          2 ->
+            Nx.dot(a_f, b_f)
+
+          rank ->
+            batch_axes = Enum.to_list(0..(rank - 3)//1)
+            Nx.dot(a_f, [rank - 1], batch_axes, b_f, [rank - 2], batch_axes)
+        end
+
+      y_q =
+        y_f
+        |> Nx.divide(y_scale)
+        |> Nx.round()
+        |> Nx.add(Nx.as_type(y_zp, work_type))
+        |> Nx.clip(min_v, max_v)
+        |> Nx.as_type(target_type)
+
+      y_q
+    end
+
+    layer =
+      Axon.layer(fun, [a, a_scale, a_zp, b, b_scale, b_zp, y_scale, y_zp],
+        name: output_name,
+        op_name: :qlinear_matmul
+      )
+
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
            op_type: "DequantizeLinear",
            attribute: attrs,
            input: inputs,
