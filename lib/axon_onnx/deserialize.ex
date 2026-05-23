@@ -1139,6 +1139,129 @@ defmodule AxonOnnx.Deserialize do
   end
 
   defp recur_nodes(
+         %Node{op_type: "ConvTranspose", attribute: attrs, input: input, output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    # ONNX ConvTranspose mirrors Conv but with the kernel oriented (C_in,
+    # C_out/group, ...spatial...). Axon's conv_transpose handles the
+    # spatial inversion and stride/dilation/padding; we keep channels=:first
+    # to match ONNX layout.
+    options = options!(attrs)
+    auto_pad = options["auto_pad"] || "NOTSET"
+    group = options["group"] || 1
+    pads = options["pads"]
+    kernel_shape_attr = options["kernel_shape"]
+
+    if group != 1 do
+      raise ArgumentError, "ConvTranspose with group #{group} is not yet supported"
+    end
+
+    [inp_name, kernel_name | maybe_bias] = input
+
+    inp = input!(inp_name, axon, params, used_params)
+    kernel = input!(kernel_name, axon, params, used_params)
+
+    bias =
+      case maybe_bias do
+        [] -> nil
+        [b] -> input!(b, axon, params, used_params)
+      end
+
+    kernel_shape =
+      case kernel do
+        %Nx.Tensor{} = t -> Nx.shape(t)
+        %Axon{} = node -> kernel_shape_from_axon!(node)
+      end
+
+    kernel_size =
+      if kernel_shape_attr do
+        List.to_tuple(kernel_shape_attr)
+      else
+        kernel_shape |> Tuple.delete_at(0) |> Tuple.delete_at(0)
+      end
+
+    spatial_rank = tuple_size(kernel_size)
+    dilations = options["dilations"] || List.duplicate(1, spatial_rank)
+    strides = options["strides"] || List.duplicate(1, spatial_rank)
+
+    padding_config = padding!(auto_pad, pads, kernel_size, strides)
+    units = elem(kernel_shape, 1) * group
+
+    base_opts = [
+      kernel_size: kernel_size,
+      kernel_dilation: dilations,
+      padding: padding_config,
+      strides: strides,
+      name: output_name,
+      channels: :first
+    ]
+
+    # ONNX kernel layout is (C_in, C_out/group, ...spatial); Axon expects
+    # (C_out, C_in/group, ...spatial). Transpose the first two dims.
+    onnx_to_axon_kernel = fn k ->
+      perm = [1, 0 | Enum.to_list(2..(Nx.rank(k) - 1)//1)]
+      Nx.transpose(k, axes: perm)
+    end
+
+    {updated_axon, updated_params} =
+      case {get_axon_node(inp), get_axon_node(kernel), get_axon_node(bias)} do
+        {%Axon.Node{}, %Nx.Tensor{} = kernel, nil} ->
+          out = Axon.conv_transpose(inp, units, [use_bias: false] ++ base_opts)
+
+          {Map.put(axon, output_name, out),
+           Map.put(used_params, output_name, %{"kernel" => onnx_to_axon_kernel.(kernel)})}
+
+        {%Axon.Node{}, %Nx.Tensor{} = kernel, %Nx.Tensor{} = bias} ->
+          out = Axon.conv_transpose(inp, units, [use_bias: true] ++ base_opts)
+
+          {Map.put(axon, output_name, out),
+           Map.put(used_params, output_name, %{
+             "kernel" => onnx_to_axon_kernel.(kernel),
+             "bias" => bias
+           })}
+
+        {%Axon.Node{}, %Axon.Node{}, nil} ->
+          # Kernel is a graph input rather than an initialiser — common in
+          # the corpus, where every conv-style weight is a runtime input.
+          # Drop to Axon.Layers.conv_transpose directly via Axon.layer so we
+          # don't need Axon's own parameter creation; transpose the kernel
+          # inside the layer fn so traced shapes match.
+          fun = fn x, w, _opts ->
+            w = onnx_to_axon_kernel.(w)
+
+            Axon.Layers.conv_transpose(x, w, 0,
+              strides: strides,
+              padding: padding_config,
+              kernel_dilation: dilations,
+              channels: :first
+            )
+          end
+
+          out = Axon.layer(fun, [inp, kernel], name: output_name, op_name: :conv_transpose)
+          {Map.put(axon, output_name, out), used_params}
+
+        {%Axon.Node{}, %Axon.Node{}, %Axon.Node{}} ->
+          fun = fn x, w, b, _opts ->
+            w = onnx_to_axon_kernel.(w)
+
+            Axon.Layers.conv_transpose(x, w, b,
+              strides: strides,
+              padding: padding_config,
+              kernel_dilation: dilations,
+              channels: :first
+            )
+          end
+
+          out =
+            Axon.layer(fun, [inp, kernel, bias], name: output_name, op_name: :conv_transpose)
+
+          {Map.put(axon, output_name, out), used_params}
+      end
+
+    {updated_axon, params, updated_params}
+  end
+
+  defp recur_nodes(
          %Node{
            op_type: "BatchNormalization",
            input: [inp, gamma, beta, mean, var],
@@ -3134,6 +3257,15 @@ defmodule AxonOnnx.Deserialize do
       "mean" ->
         Nx.divide(Nx.sum(masked_loss), Nx.sum(masked_weights))
     end
+  end
+
+  defp kernel_shape_from_axon!(%Axon{} = node) do
+    layer_inputs =
+      node
+      |> Axon.get_inputs()
+      |> Map.new(fn {k, v} -> {k, Nx.broadcast(0.0, v)} end)
+
+    Axon.get_output_shape(node, layer_inputs)
   end
 
   defp broadcast_q_params(scale, zp, x, axis) do

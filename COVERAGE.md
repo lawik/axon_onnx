@@ -7,8 +7,8 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 659 | 36.8% |
-| unsupported | 1134 | 63.2% |
+| passing | 663 | 37.0% |
+| unsupported | 1130 | 63.0% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -17,8 +17,8 @@ Total cases: **1793**
 
 **node** — 1653 cases
 
-- passing: 566
-- unsupported: 1087
+- passing: 570
+- unsupported: 1083
 
 **pytorch-converted** — 82 cases
 
@@ -82,7 +82,7 @@ A case using N distinct ops contributes to N rows.
 | ConstantOfShape | 72 | 0 | 72 | 0 | 0 | 0 |
 | Conv | 33 | 27 | 6 | 0 | 0 | 0 |
 | ConvInteger | 2 | 0 | 2 | 0 | 0 | 0 |
-| ConvTranspose | 14 | 0 | 14 | 0 | 0 | 0 |
+| ConvTranspose | 14 | 4 | 10 | 0 | 0 | 0 |
 | Cos | 8 | 2 | 6 | 0 | 0 | 0 |
 | Cosh | 2 | 2 | 0 | 0 | 0 | 0 |
 | CumSum | 9 | 0 | 9 | 0 | 0 | 0 |
