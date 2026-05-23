@@ -552,6 +552,83 @@ defmodule AxonOnnx.Serialize do
     {:tanh, "Tanh"}
   ]
 
+  ## Unary Nx ops (Axon.nx escape hatch)
+
+  # The deserializer's @nx_op_types maps "Abs" → &Nx.abs/1 etc. and builds
+  # Axon.nx nodes whose `op` is the captured function and `op_name` is the
+  # atom from `Function.info`. Round-tripping those back to ONNX means
+  # dispatching on op_name (since the function itself is opaque). The set
+  # below mirrors @nx_op_types in the deserializer.
+  @nx_unary_op_to_onnx %{
+    abs: "Abs",
+    acos: "Acos",
+    acosh: "Acosh",
+    asin: "Asin",
+    asinh: "Asinh",
+    atan: "Atan",
+    atanh: "Atanh",
+    ceil: "Ceil",
+    cos: "Cos",
+    cosh: "Cosh",
+    erf: "Erf",
+    floor: "Floor",
+    hardswish: "HardSwish",
+    identity: "Identity",
+    is_infinity: "IsInf",
+    is_nan: "IsNaN",
+    log: "Log",
+    negate: "Neg",
+    logical_not: "Not",
+    round: "Round",
+    reciprocal: "Reciprocal",
+    sign: "Sign",
+    sin: "Sin",
+    sinh: "Sinh",
+    sqrt: "Sqrt",
+    tan: "Tan"
+  }
+
+  defp to_onnx(
+         %Axon.Node{id: id, op: op, op_name: op_name, name: name_fn, parent: [inp_id]},
+         nodes_map,
+         templates,
+         inputs,
+         param_names,
+         nodes,
+         op_counts,
+         cache
+       )
+       when is_function(op) and is_map_key(@nx_unary_op_to_onnx, op_name) do
+    onnx_op = Map.fetch!(@nx_unary_op_to_onnx, op_name)
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[inp_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    inp_name = cache[inp_id]
+
+    {name, op_counts, cache} =
+      case cache do
+        %{^id => name} ->
+          {name, op_counts, cache}
+
+        %{} ->
+          name = name_fn.(op_name, op_counts)
+          op_counts = Map.update(op_counts, op_name, 1, fn x -> x + 1 end)
+          cache = Map.put(cache, id, name)
+          {name, op_counts, cache}
+      end
+
+    node = %Node{
+      input: [inp_name],
+      output: [name],
+      name: name,
+      op_type: onnx_op,
+      attribute: []
+    }
+
+    {inputs, param_names, [node | nodes], op_counts, cache}
+  end
+
   for {op, onnx_op} <- @supported_activations do
     defp to_onnx(
            %Axon.Node{id: id, op: unquote(op), name: name_fn, parent: [inp_id]},
