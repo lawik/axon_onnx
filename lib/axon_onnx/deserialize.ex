@@ -16,24 +16,73 @@ defmodule AxonOnnx.Deserialize do
 
   import AxonOnnx.Shared
 
+  @opsets_key {__MODULE__, :opsets}
+
   def __load__(binary, opts \\ []) do
     binary
     |> Model.decode!()
     |> to_axon(opts)
   end
 
-  defp to_axon(%Model{graph: %Graph{} = graph}, dimensions) do
-    {graph, params} = graph_to_axon(graph, dimensions)
+  defp to_axon(%Model{graph: %Graph{} = graph, opset_import: opset_imports}, dimensions) do
+    opsets = build_opsets(opset_imports)
+    previous = Process.put(@opsets_key, opsets)
 
-    case graph do
-      [graph] ->
-        # single-output
-        {graph, params}
+    try do
+      {graph, params} = graph_to_axon(graph, dimensions)
 
-      graph when is_list(graph) ->
-        # multi-output
-        {Axon.container(List.to_tuple(graph)), params}
+      case graph do
+        [graph] ->
+          # single-output
+          {graph, params}
+
+        graph when is_list(graph) ->
+          # multi-output
+          {Axon.container(List.to_tuple(graph)), params}
+      end
+    after
+      case previous do
+        nil -> Process.delete(@opsets_key)
+        prev -> Process.put(@opsets_key, prev)
+      end
     end
+  end
+
+  @doc """
+  Returns the ONNX opset version in scope for the current deserialization
+  call, for the given domain (default: the core `ai.onnx` domain, encoded as
+  the empty string in `opset_import`).
+
+  Returns `nil` if called outside `AxonOnnx.import/2`/`load/2`, or if the
+  model does not declare an opset for the requested domain.
+
+  This is the foundation for opset-version-aware dispatch in `recur_nodes/2`.
+  An ONNX op's semantics often change across opset versions — `Clip`'s
+  min/max moved from attributes to inputs at opset 11; `Squeeze`/`Unsqueeze`
+  did the same for `axes` at opset 13; `Resize` has been rewritten multiple
+  times — so dispatch clauses that want to honour the spec exactly should
+  consult `opset_version/1` rather than rely on argument arity or attribute
+  presence alone.
+
+  Subgraphs (e.g. an `If` branch) inherit the parent model's opsets
+  automatically: `to_axon/2` installs them in the process dictionary for the
+  duration of the call, and the recursive `graph_to_axon/2` for subgraphs
+  runs in the same process.
+  """
+  @spec opset_version(String.t()) :: integer() | nil
+  def opset_version(domain \\ "") when is_binary(domain) do
+    case Process.get(@opsets_key) do
+      nil -> nil
+      map -> Map.get(map, domain)
+    end
+  end
+
+  defp build_opsets(nil), do: %{}
+
+  defp build_opsets(opset_imports) when is_list(opset_imports) do
+    Enum.reduce(opset_imports, %{}, fn import_id, acc ->
+      Map.put(acc, import_id.domain || "", import_id.version)
+    end)
   end
 
   def graph_to_axon(%Graph{node: nodes} = graph, dimensions) do
