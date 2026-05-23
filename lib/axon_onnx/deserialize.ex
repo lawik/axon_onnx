@@ -1374,16 +1374,18 @@ defmodule AxonOnnx.Deserialize do
   defp recur_nodes(
          %Node{
            op_type: "DequantizeLinear",
+           attribute: attrs,
            input: inputs,
            output: [output_name]
          },
          {axon, params, used_params}
        ) do
     # DequantizeLinear: y = (x - x_zero_point) * x_scale.
-    # All three inputs (x, scale, zero_point) participate. zero_point is
-    # optional in the spec; in the corpus it's always provided. axis
-    # support for per-channel/-block quantisation works as long as Nx's
-    # broadcasting handles the (rank-1) scale/zero shape correctly.
+    # For per-channel quantisation (1-D scale of size N), scale/zero_point
+    # are reshaped to broadcast along x's `axis` dim. Per-tensor (scalar)
+    # quantisation needs no reshape. axis defaults to 1 per ONNX opset 13+.
+    axis = options!(attrs)["axis"] || 1
+
     {x_name, scale_name, zp_name} =
       case inputs do
         [x, s] -> {x, s, nil}
@@ -1397,6 +1399,7 @@ defmodule AxonOnnx.Deserialize do
       case zp_name do
         nil ->
           {fn x, scale, _opts ->
+             {scale, _} = broadcast_q_params(scale, nil, x, axis)
              Nx.multiply(Nx.as_type(x, Nx.type(scale)), scale)
            end, [x, scale]}
 
@@ -1404,6 +1407,7 @@ defmodule AxonOnnx.Deserialize do
           zp = input!(zp_name, axon, params, used_params)
 
           {fn x, scale, zp, _opts ->
+             {scale, zp} = broadcast_q_params(scale, zp, x, axis)
              out_type = Nx.type(scale)
 
              Nx.subtract(Nx.as_type(x, out_type), Nx.as_type(zp, out_type))
@@ -1419,14 +1423,19 @@ defmodule AxonOnnx.Deserialize do
   defp recur_nodes(
          %Node{
            op_type: "QuantizeLinear",
+           attribute: attrs,
            input: inputs,
            output: [output_name]
          },
          {axon, params, used_params}
        ) do
     # QuantizeLinear: y = saturate(round(x / y_scale) + y_zero_point) cast
-    # to zero_point's type. The saturate clamp is per dtype-range; without
-    # it Nx.as_type truncates on overflow, breaking the round-trip test.
+    # to zero_point's type. Per-channel quantisation broadcasts a 1-D
+    # scale/zero_point along x's `axis` dim (default 1). The saturate clamp
+    # is per dtype-range — Nx.as_type truncates on overflow rather than
+    # clipping, so we explicitly clip before casting.
+    axis = options!(attrs)["axis"] || 1
+
     {x_name, scale_name, zp_name} =
       case inputs do
         [x, s] -> {x, s, nil}
@@ -1445,6 +1454,7 @@ defmodule AxonOnnx.Deserialize do
       case zp do
         nil ->
           {fn x, scale, _opts ->
+             {scale, _} = broadcast_q_params(scale, nil, x, axis)
              scaled = Nx.divide(x, scale)
              rounded = Nx.round(scaled)
              clipped = Nx.clip(rounded, min_v, max_v)
@@ -1453,6 +1463,7 @@ defmodule AxonOnnx.Deserialize do
 
         _ ->
           {fn x, scale, zp, _opts ->
+             {scale, zp} = broadcast_q_params(scale, zp, x, axis)
              work_type = Nx.type(scale)
              scaled = Nx.divide(x, scale)
              rounded = Nx.round(scaled)
@@ -3122,6 +3133,28 @@ defmodule AxonOnnx.Deserialize do
 
       "mean" ->
         Nx.divide(Nx.sum(masked_loss), Nx.sum(masked_weights))
+    end
+  end
+
+  defp broadcast_q_params(scale, zp, x, axis) do
+    case Nx.shape(scale) do
+      {} ->
+        {scale, zp}
+
+      {n} ->
+        x_rank = Nx.rank(x)
+        pos_axis = if axis < 0, do: x_rank + axis, else: axis
+
+        new_shape =
+          List.duplicate(1, x_rank)
+          |> List.to_tuple()
+          |> put_elem(pos_axis, n)
+
+        zp = if zp, do: Nx.reshape(zp, new_shape), else: nil
+        {Nx.reshape(scale, new_shape), zp}
+
+      _ ->
+        {scale, zp}
     end
   end
 

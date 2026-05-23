@@ -7,8 +7,8 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 657 | 36.6% |
-| unsupported | 1136 | 63.4% |
+| passing | 659 | 36.8% |
+| unsupported | 1134 | 63.2% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -17,8 +17,8 @@ Total cases: **1793**
 
 **node** — 1653 cases
 
-- passing: 564
-- unsupported: 1089
+- passing: 566
+- unsupported: 1087
 
 **pytorch-converted** — 82 cases
 
@@ -89,7 +89,7 @@ A case using N distinct ops contributes to N rows.
 | DFT | 6 | 0 | 6 | 0 | 0 | 0 |
 | DeformConv | 4 | 0 | 4 | 0 | 0 | 0 |
 | DepthToSpace | 2 | 0 | 2 | 0 | 0 | 0 |
-| DequantizeLinear | 14 | 3 | 11 | 0 | 0 | 0 |
+| DequantizeLinear | 14 | 4 | 10 | 0 | 0 | 0 |
 | Det | 2 | 0 | 2 | 0 | 0 | 0 |
 | Div | 184 | 13 | 171 | 0 | 0 | 0 |
 | Dropout | 12 | 3 | 9 | 0 | 0 | 0 |
@@ -166,7 +166,7 @@ A case using N distinct ops contributes to N rows.
 | Pow | 17 | 15 | 2 | 0 | 0 | 0 |
 | QLinearConv | 1 | 0 | 1 | 0 | 0 | 0 |
 | QLinearMatMul | 8 | 0 | 8 | 0 | 0 | 0 |
-| QuantizeLinear | 16 | 4 | 12 | 0 | 0 | 0 |
+| QuantizeLinear | 16 | 5 | 11 | 0 | 0 | 0 |
 | RMSNormalization | 19 | 19 | 0 | 0 | 0 | 0 |
 | RNN | 4 | 0 | 4 | 0 | 0 | 0 |
 | RandomUniformLike | 3 | 0 | 3 | 0 | 0 | 0 |
