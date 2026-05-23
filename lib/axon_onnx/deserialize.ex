@@ -1302,6 +1302,49 @@ defmodule AxonOnnx.Deserialize do
 
   defp recur_nodes(
          %Node{
+           op_type: "NegativeLogLikelihoodLoss",
+           attribute: attrs,
+           input: inputs,
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # NLLLoss(input: (N, C, d1, …, dk), target: (N, d1, …, dk),
+    #         weight: (C,) optional) → loss
+    # Reduction in {none, sum, mean}; mean is weighted by sum-of-used-weights.
+    options = options!(attrs)
+    reduction = options["reduction"] || "mean"
+    ignore_index = options["ignore_index"]
+
+    {input_name, target_name, weight_name} =
+      case inputs do
+        [i, t] -> {i, t, nil}
+        [i, t, w] -> {i, t, w}
+      end
+
+    input = input!(input_name, axon, params, used_params)
+    target = input!(target_name, axon, params, used_params)
+    weight = if weight_name, do: input!(weight_name, axon, params, used_params), else: nil
+
+    layer_inputs = [input, target] ++ if weight, do: [weight], else: []
+
+    {layer, _} =
+      case length(layer_inputs) do
+        2 ->
+          fun = fn i, t, _opts -> do_nll_loss(i, t, nil, ignore_index, reduction) end
+          {Axon.layer(fun, layer_inputs, name: output_name, op_name: :nll_loss), nil}
+
+        3 ->
+          fun = fn i, t, w, _opts -> do_nll_loss(i, t, w, ignore_index, reduction) end
+          {Axon.layer(fun, layer_inputs, name: output_name, op_name: :nll_loss), nil}
+      end
+
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
            op_type: "ScatterElements",
            attribute: attrs,
            input: [data_name, indices_name, updates_name],
@@ -1875,6 +1918,12 @@ defmodule AxonOnnx.Deserialize do
          %Node{op_type: "If", input: [input], attribute: attrs, output: outputs},
          {axon, params, used_params}
        ) do
+    # ONNX If takes a bool scalar condition plus two subgraphs as attributes.
+    # Each subgraph is recursively deserialised via graph_to_axon/2. Axon.cond
+    # requires the cond_fn to return a scalar bool tensor — the dispatch above
+    # only guarantees the input is some numeric scalar (in practice the bool
+    # elem_type, but Axon discards declared dtype on graph inputs), so we map
+    # through Nx.not_equal/2 to coerce to bool semantics.
     cond_options = options!(attrs)
 
     inp = axon!(input, axon)
@@ -1889,7 +1938,7 @@ defmodule AxonOnnx.Deserialize do
     updated_axon =
       outputs
       |> Enum.reduce(axon, fn out_name, axon ->
-        Map.put(axon, out_name, Axon.cond(inp, & &1, then_graph, else_graph))
+        Map.put(axon, out_name, Axon.cond(inp, &Nx.not_equal(&1, 0), then_graph, else_graph))
       end)
 
     updated_params =
@@ -2858,6 +2907,54 @@ defmodule AxonOnnx.Deserialize do
         fun = fn x, _opts -> do_trilu(x, Nx.tensor(k, type: {:s, 64}), upper) end
         layer = Axon.layer(fun, [inp], name: output_name, op_name: :trilu)
         {Map.put(axon, output_name, layer), params, used_params}
+    end
+  end
+
+  defp do_nll_loss(input, target, weight, ignore_index, reduction) do
+    target_i = Nx.as_type(target, {:s, 64})
+
+    # When ignore_index is a value outside [0, C), Nx.take_along_axis would
+    # raise. Substitute a safe in-range value at those positions and rely on
+    # the mask to zero them out below.
+    safe_target =
+      if ignore_index do
+        keep = Nx.not_equal(target_i, ignore_index)
+        Nx.select(keep, target_i, Nx.tensor(0, type: {:s, 64}))
+      else
+        target_i
+      end
+
+    expanded_target = Nx.new_axis(safe_target, 1)
+    gathered = Nx.take_along_axis(input, expanded_target, axis: 1)
+    loss_at_target = Nx.squeeze(gathered, axes: [1])
+    neg_loss = Nx.negate(loss_at_target)
+
+    {weighted_loss, weight_at_target} =
+      if weight do
+        w_at = Nx.take(weight, safe_target)
+        {Nx.multiply(neg_loss, w_at), w_at}
+      else
+        {neg_loss, Nx.broadcast(Nx.tensor(1, type: Nx.type(neg_loss)), Nx.shape(neg_loss))}
+      end
+
+    {masked_loss, masked_weights} =
+      if ignore_index do
+        keep = Nx.not_equal(target_i, ignore_index)
+        keep_t = Nx.as_type(keep, Nx.type(weighted_loss))
+        {Nx.multiply(weighted_loss, keep_t), Nx.multiply(weight_at_target, keep_t)}
+      else
+        {weighted_loss, weight_at_target}
+      end
+
+    case reduction do
+      "none" ->
+        masked_loss
+
+      "sum" ->
+        Nx.sum(masked_loss)
+
+      "mean" ->
+        Nx.divide(Nx.sum(masked_loss), Nx.sum(masked_weights))
     end
   end
 
