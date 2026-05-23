@@ -711,22 +711,16 @@ defmodule AxonOnnx.Coverage.Registry do
       {:known_bug,
        "Axon.Layers.conv_transpose with kernel_dilation != 1 diverges from " <>
          "ONNX spec; see commit 06eb8bb."},
-    {"node", "test_quantizelinear_int8"} =>
-      {:known_bug,
-       "QuantizeLinear at s8 diverges from golden — round-half-to-even " <>
-         "boundary behaviour around -128/+127 doesn't match onnxruntime."},
-    {"node", "test_qlinearmatmul_2D_int8_float16"} =>
-      {:known_bug,
-       "QLinearMatMul at s8 with float16 work-type loses precision in the " <>
-         "intermediate scale/divide before re-quantising."},
-    {"node", "test_qlinearmatmul_2D_int8_float32"} =>
-      {:known_bug, "Same s8 rounding mismatch as test_quantizelinear_int8."},
+    {"node", "test_qlinearmatmul_2D_int8_float16"} => {:passing, nil},
+    {"node", "test_qlinearmatmul_2D_int8_float32"} => {:passing, nil},
+    {"node", "test_qlinearmatmul_3D_int8_float32"} => {:passing, nil},
     {"node", "test_qlinearmatmul_3D_int8_float16"} =>
       {:known_bug,
-       "QLinearMatMul at s8 with float16 work-type loses precision in the " <>
-         "intermediate scale/divide before re-quantising."},
-    {"node", "test_qlinearmatmul_3D_int8_float32"} =>
-      {:known_bug, "Same s8 rounding mismatch as test_quantizelinear_int8."},
+       "QLinearMatMul s8/float16: float16 intermediate precision causes one " <>
+         "row of golden output to differ by 1 ULP. The s8 saturate-vs-wrap " <>
+         "fix (commit removing Nx.clip) handles the overflow path; the " <>
+         "remaining divergence is genuine float16 precision loss in the " <>
+         "scale/divide step before requantisation."},
     {"node", "test_convinteger_with_padding"} =>
       {:known_bug, "ConvInteger with non-zero padding diverges from golden."},
     {"node", "test_if"} =>

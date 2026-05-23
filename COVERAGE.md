@@ -7,22 +7,22 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 686 | 38.3% |
+| passing | 689 | 38.4% |
 | unsupported | 1100 | 61.3% |
-| known_bug | 7 | 0.4% |
+| known_bug | 4 | 0.2% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 ## Round-trip coverage
 
-Of the 686 cases that import cleanly, how many also export back to
+Of the 689 cases that import cleanly, how many also export back to
 ONNX and re-import with matching predictions (the full bidirectional
 Nx/Axon ⇄ ONNX path).
 
 | Classification | Count | % of import-passing |
 |---|---|---|
-| passing | 308 | 44.9% |
-| unsupported | 378 | 55.1% |
+| passing | 308 | 44.7% |
+| unsupported | 381 | 55.3% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -32,9 +32,9 @@ Nx/Axon ⇄ ONNX path).
 
 **node** — 1653 cases
 
-- passing: 586
+- passing: 589
 - unsupported: 1060
-- known_bug: 7
+- known_bug: 4
 
 **pytorch-converted** — 82 cases
 
@@ -181,7 +181,7 @@ A case using N distinct ops contributes to N rows.
 | Pad | 18 | 2 | 16 | 0 | 0 | 0 |
 | Pow | 17 | 16 | 1 | 0 | 0 | 0 |
 | QLinearConv | 1 | 1 | 0 | 0 | 0 | 0 |
-| QLinearMatMul | 8 | 4 | 0 | 4 | 0 | 0 |
+| QLinearMatMul | 8 | 7 | 0 | 1 | 0 | 0 |
 | QuantizeLinear | 16 | 7 | 9 | 0 | 0 | 0 |
 | RMSNormalization | 19 | 19 | 0 | 0 | 0 | 0 |
 | RNN | 4 | 0 | 4 | 0 | 0 | 0 |

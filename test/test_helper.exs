@@ -96,7 +96,7 @@ defmodule OnnxTestHelper do
     # (alphabetical) order — otherwise any model whose input names aren't
     # already alphabetical (Clip's [x, min, max], Trilu's [x, k], etc.)
     # gets scrambled inputs. Same fix as AxonOnnx.Coverage.run_case/2.
-    init_names =
+    non_initializer_input_names =
       model_path
       |> File.read!()
       |> Onnx.ModelProto.decode!()
@@ -115,7 +115,7 @@ defmodule OnnxTestHelper do
       inp_tensors =
         input_paths
         |> Enum.map(&pb_to_tensor/1)
-        |> Enum.zip(init_names)
+        |> Enum.zip(non_initializer_input_names)
         |> Map.new(fn {v, k} -> {k, v} end)
 
       out_tensors = Enum.map(output_paths, &pb_to_tensor/1)

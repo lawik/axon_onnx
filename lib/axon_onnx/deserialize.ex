@@ -1598,12 +1598,18 @@ defmodule AxonOnnx.Deserialize do
             Nx.dot(a_f, [rank - 1], batch_axes, b_f, [rank - 2], batch_axes)
         end
 
+      # QLinearMatMul per ONNX spec doesn't saturate — the corpus's int8
+      # golden wraps around on overflow (e.g. -236 → 20 = -236 + 256). Skip
+      # the Nx.clip and let Nx.as_type's modular truncation handle it. The
+      # remaining `min_v`/`max_v` are unused here; kept in the outer scope
+      # for QuantizeLinear which does saturate.
+      _ = {min_v, max_v}
+
       y_q =
         y_f
         |> Nx.divide(y_scale)
         |> Nx.round()
         |> Nx.add(Nx.as_type(y_zp, work_type))
-        |> Nx.clip(min_v, max_v)
         |> Nx.as_type(target_type)
 
       y_q
@@ -3728,11 +3734,15 @@ defmodule AxonOnnx.Deserialize do
         y_f
       end
 
+    # Like QLinearMatMul, QLinearConv per spec wraps on output overflow
+    # rather than saturating. The min_v / max_v range is unused here but
+    # the helper is shared with QuantizeLinear which does saturate.
+    _ = {min_v, max_v}
+
     y_f
     |> Nx.divide(y_scale)
     |> Nx.round()
     |> Nx.add(Nx.as_type(y_zp, work_type))
-    |> Nx.clip(min_v, max_v)
     |> Nx.as_type(target_type)
   end
 
