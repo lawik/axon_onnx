@@ -1302,6 +1302,77 @@ defmodule AxonOnnx.Deserialize do
 
   defp recur_nodes(
          %Node{
+           op_type: "SoftmaxCrossEntropyLoss",
+           attribute: attrs,
+           input: inputs,
+           output: outputs
+         },
+         {axon, params, used_params}
+       ) do
+    # SoftmaxCrossEntropyLoss = log_softmax(scores, axis=1) → NLLLoss.
+    # Optional second output is log_prob (the post-log_softmax tensor).
+    options = options!(attrs)
+    reduction = options["reduction"] || "mean"
+    ignore_index = options["ignore_index"]
+
+    {scores_name, labels_name, weight_name} =
+      case inputs do
+        [s, l] -> {s, l, nil}
+        [s, l, w] -> {s, l, w}
+      end
+
+    scores = input!(scores_name, axon, params, used_params)
+    labels = input!(labels_name, axon, params, used_params)
+    weight = if weight_name, do: input!(weight_name, axon, params, used_params), else: nil
+
+    loss_name = hd(outputs)
+
+    loss_layer =
+      case weight do
+        nil ->
+          fun = fn s, l, _opts ->
+            log_prob = Axon.Activations.log_softmax(s, axis: 1)
+            do_nll_loss(log_prob, l, nil, ignore_index, reduction)
+          end
+
+          Axon.layer(fun, [scores, labels], name: loss_name, op_name: :softmax_cross_entropy)
+
+        _ ->
+          fun = fn s, l, w, _opts ->
+            log_prob = Axon.Activations.log_softmax(s, axis: 1)
+            do_nll_loss(log_prob, l, w, ignore_index, reduction)
+          end
+
+          Axon.layer(fun, [scores, labels, weight],
+            name: loss_name,
+            op_name: :softmax_cross_entropy
+          )
+      end
+
+    axon = Map.put(axon, loss_name, loss_layer)
+
+    axon =
+      case outputs do
+        [_only] ->
+          axon
+
+        [_loss_name, log_prob_name | _] ->
+          log_prob_layer =
+            Axon.layer(
+              fn s, _opts -> Axon.Activations.log_softmax(s, axis: 1) end,
+              [scores],
+              name: log_prob_name,
+              op_name: :log_softmax
+            )
+
+          Map.put(axon, log_prob_name, log_prob_layer)
+      end
+
+    {axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
            op_type: "NegativeLogLikelihoodLoss",
            attribute: attrs,
            input: inputs,

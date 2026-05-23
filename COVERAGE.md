@@ -7,8 +7,8 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 616 | 34.4% |
-| unsupported | 1177 | 65.6% |
+| passing | 650 | 36.3% |
+| unsupported | 1143 | 63.7% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -17,8 +17,8 @@ Total cases: **1793**
 
 **node** — 1653 cases
 
-- passing: 523
-- unsupported: 1130
+- passing: 557
+- unsupported: 1096
 
 **pytorch-converted** — 82 cases
 
@@ -212,7 +212,7 @@ A case using N distinct ops contributes to N rows.
 | Size | 63 | 2 | 61 | 0 | 0 | 0 |
 | Slice | 83 | 0 | 83 | 0 | 0 | 0 |
 | Softmax | 73 | 11 | 62 | 0 | 0 | 0 |
-| SoftmaxCrossEntropyLoss | 34 | 0 | 34 | 0 | 0 | 0 |
+| SoftmaxCrossEntropyLoss | 34 | 34 | 0 | 0 | 0 | 0 |
 | Softplus | 4 | 4 | 0 | 0 | 0 | 0 |
 | Softsign | 2 | 2 | 0 | 0 | 0 | 0 |
 | SpaceToDepth | 2 | 0 | 2 | 0 | 0 | 0 |
