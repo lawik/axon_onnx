@@ -7,8 +7,8 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 663 | 37.0% |
-| unsupported | 1130 | 63.0% |
+| passing | 669 | 37.3% |
+| unsupported | 1124 | 62.7% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -17,8 +17,8 @@ Total cases: **1793**
 
 **node** — 1653 cases
 
-- passing: 570
-- unsupported: 1083
+- passing: 575
+- unsupported: 1078
 
 **pytorch-converted** — 82 cases
 
@@ -32,8 +32,8 @@ Total cases: **1793**
 
 **simple** — 23 cases
 
-- passing: 2
-- unsupported: 21
+- passing: 3
+- unsupported: 20
 
 ## Per-operator breakdown
 
@@ -138,7 +138,7 @@ A case using N distinct ops contributes to N rows.
 | LogSoftmax | 44 | 10 | 34 | 0 | 0 | 0 |
 | Loop | 11 | 0 | 11 | 0 | 0 | 0 |
 | LpNormalization | 6 | 0 | 6 | 0 | 0 | 0 |
-| LpPool | 8 | 0 | 8 | 0 | 0 | 0 |
+| LpPool | 8 | 3 | 5 | 0 | 0 | 0 |
 | MatMul | 74 | 5 | 69 | 0 | 0 | 0 |
 | MatMulInteger | 1 | 0 | 1 | 0 | 0 | 0 |
 | Max | 28 | 22 | 6 | 0 | 0 | 0 |
@@ -204,7 +204,7 @@ A case using N distinct ops contributes to N rows.
 | SequenceLength | 8 | 0 | 8 | 0 | 0 | 0 |
 | SequenceMap | 6 | 0 | 6 | 0 | 0 | 0 |
 | Shape | 180 | 10 | 170 | 0 | 0 | 0 |
-| Shrink | 3 | 0 | 3 | 0 | 0 | 0 |
+| Shrink | 3 | 3 | 0 | 0 | 0 | 0 |
 | Sigmoid | 8 | 6 | 2 | 0 | 0 | 0 |
 | Sign | 2 | 2 | 0 | 0 | 0 | 0 |
 | Sin | 2 | 2 | 0 | 0 | 0 | 0 |

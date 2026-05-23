@@ -1679,6 +1679,67 @@ defmodule AxonOnnx.Deserialize do
   end
 
   defp recur_nodes(
+         %Node{op_type: "Shrink", attribute: attrs, input: [input_name], output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    # Shrink(x): if x < -lambd → x + bias ; if x > lambd → x - bias ; else 0.
+    # Defaults: bias=0, lambd=0.5.
+    options = options!(attrs)
+    bias = options["bias"] || 0.0
+    lambd = options["lambd"] || 0.5
+
+    input = input!(input_name, axon, params, used_params)
+
+    fun = fn x, _opts ->
+      pos = Nx.greater(x, lambd)
+      neg = Nx.less(x, -lambd)
+      zero = Nx.tensor(0, type: Nx.type(x))
+
+      Nx.select(
+        pos,
+        Nx.subtract(x, bias),
+        Nx.select(neg, Nx.add(x, bias), Nx.broadcast(zero, Nx.shape(x)))
+      )
+    end
+
+    layer = Axon.layer(fun, [input], name: output_name, op_name: :shrink)
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{op_type: "LpPool", attribute: attrs, input: [input_name], output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    # LpPool: pooling using L_p norm — sum(|x|^p)^(1/p) over the window.
+    # Axon.Layers.lp_pool provides this directly; we map ONNX attributes.
+    options = options!(attrs)
+    kernel_shape = options["kernel_shape"] |> List.to_tuple()
+    p = options["p"] || 2
+    auto_pad = options["auto_pad"] || "NOTSET"
+    pads = options["pads"]
+    strides = options["strides"] || List.duplicate(1, tuple_size(kernel_shape))
+
+    padding_config = padding!(auto_pad, pads, kernel_shape, strides)
+
+    input = input!(input_name, axon, params, used_params)
+
+    fun = fn x, _opts ->
+      Axon.Layers.lp_pool(x,
+        kernel_size: kernel_shape,
+        strides: strides,
+        padding: padding_config,
+        norm: p,
+        channels: :first
+      )
+    end
+
+    layer = Axon.layer(fun, [input], name: output_name, op_name: :lp_pool)
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
          %Node{
            op_type: "Hardmax",
            attribute: attrs,
