@@ -585,7 +585,6 @@ defmodule AxonOnnx.Deserialize do
 
   @variadic_op_types [
     {"Max", &Nx.max/2, :max},
-    # {"Mean", &mean/2},
     {"Min", &Nx.min/2, :min},
     {"Sum", &Nx.add/2, :add}
   ]
@@ -614,6 +613,33 @@ defmodule AxonOnnx.Deserialize do
 
       {updated_axon, params, used_params}
     end
+  end
+
+  defp recur_nodes(
+         %Node{op_type: "Mean", input: inputs, output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    # ONNX Mean is variadic — true element-wise mean of N tensors, i.e.
+    # (x1 + x2 + ... + xN) / N. The legacy binary `mean/2` helper does
+    # pairwise (x+y)/2 which gives the wrong answer for N>2 (you'd lose
+    # half the weight of the early operands), so we sum-then-divide here.
+    n = length(inputs)
+    inputs = Enum.map(inputs, &input!(&1, axon, params, used_params))
+
+    fun = fn inputs, _opts ->
+      [init | rest] = Tuple.to_list(inputs)
+      sum = Enum.reduce(rest, init, &Nx.add/2)
+      Nx.divide(sum, n)
+    end
+
+    layer =
+      Axon.layer(fun, [Axon.container(List.to_tuple(inputs))],
+        name: output_name,
+        op_name: :mean
+      )
+
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
   end
 
   defp recur_nodes(
@@ -1687,6 +1713,46 @@ defmodule AxonOnnx.Deserialize do
   end
 
   defp recur_nodes(
+         %Node{op_type: "Trilu", attribute: attrs, input: [data_name], output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    upper = (options!(attrs)["upper"] || 1) == 1
+    inp = input!(data_name, axon, params, used_params)
+    build_trilu_layer(inp, 0, upper, output_name, axon, params, used_params)
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "Trilu",
+           attribute: attrs,
+           input: [data_name, k_name],
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    upper = (options!(attrs)["upper"] || 1) == 1
+    inp = input!(data_name, axon, params, used_params)
+    k = input!(k_name, axon, params, used_params)
+
+    case get_axon_node(k) do
+      %Axon.Node{op: :constant, opts: [value: v]} ->
+        build_trilu_layer(inp, Nx.to_number(v), upper, output_name, axon, params, used_params)
+
+      %Nx.Tensor{} = t ->
+        build_trilu_layer(inp, Nx.to_number(t), upper, output_name, axon, params, used_params)
+
+      %Axon.Node{} ->
+        fun = fn x, k_tensor, _opts ->
+          do_trilu(x, Nx.as_type(k_tensor, {:s, 64}), upper)
+        end
+
+        layer = Axon.layer(fun, [inp, k], name: output_name, op_name: :trilu)
+        updated_axon = Map.put(axon, output_name, layer)
+        {updated_axon, params, used_params}
+    end
+  end
+
+  defp recur_nodes(
          %Node{op_type: "Where", input: [c_name, x_name, y_name], output: [output_name]},
          {axon, params, used_params}
        ) do
@@ -2568,6 +2634,44 @@ defmodule AxonOnnx.Deserialize do
           Map.put(options, name, attr.type_protos)
       end
     end)
+  end
+
+  defp build_trilu_layer(inp, k, upper, output_name, axon, params, used_params)
+       when is_integer(k) and is_boolean(upper) do
+    case get_axon_node(inp) do
+      %Axon.Node{op: :constant, opts: [value: v]} ->
+        new_value = do_trilu(v, Nx.tensor(k, type: {:s, 64}), upper)
+        layer = Axon.constant(new_value, name: output_name)
+        {Map.put(axon, output_name, layer), params, used_params}
+
+      %Nx.Tensor{} = v ->
+        new_value = do_trilu(v, Nx.tensor(k, type: {:s, 64}), upper)
+        layer = Axon.constant(new_value, name: output_name)
+        {Map.put(axon, output_name, layer), params, used_params}
+
+      %Axon.Node{} ->
+        fun = fn x, _opts -> do_trilu(x, Nx.tensor(k, type: {:s, 64}), upper) end
+        layer = Axon.layer(fun, [inp], name: output_name, op_name: :trilu)
+        {Map.put(axon, output_name, layer), params, used_params}
+    end
+  end
+
+  defp do_trilu(x, k, upper) do
+    shape = Nx.shape(x)
+    rank = tuple_size(shape)
+    rows = elem(shape, rank - 2)
+    cols = elem(shape, rank - 1)
+
+    row_idx = Nx.iota({rows, 1}, type: {:s, 64})
+    col_idx = Nx.iota({1, cols}, type: {:s, 64})
+    diff = Nx.subtract(col_idx, row_idx)
+
+    mask =
+      if upper,
+        do: Nx.greater_equal(diff, k),
+        else: Nx.less_equal(diff, k)
+
+    Nx.select(mask, x, Nx.tensor(0, type: Nx.type(x)))
   end
 
   defp shape!(%Placeholder{shape: %Shape{dim: dims}}, dim_params) do

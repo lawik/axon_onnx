@@ -7,8 +7,8 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 518 | 28.9% |
-| unsupported | 1275 | 71.1% |
+| passing | 543 | 30.3% |
+| unsupported | 1250 | 69.7% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -17,8 +17,8 @@ Total cases: **1793**
 
 **node** — 1653 cases
 
-- passing: 425
-- unsupported: 1228
+- passing: 450
+- unsupported: 1203
 
 **pytorch-converted** — 82 cases
 
@@ -69,16 +69,16 @@ A case using N distinct ops contributes to N rows.
 | BitwiseXor | 4 | 0 | 4 | 0 | 0 | 0 |
 | BlackmanWindow | 2 | 0 | 2 | 0 | 0 | 0 |
 | Cast | 284 | 7 | 277 | 0 | 0 | 0 |
-| CastLike | 108 | 27 | 81 | 0 | 0 | 0 |
+| CastLike | 108 | 29 | 79 | 0 | 0 | 0 |
 | Ceil | 4 | 2 | 2 | 0 | 0 | 0 |
 | Celu | 1 | 1 | 0 | 0 | 0 | 0 |
 | CenterCropPad | 6 | 0 | 6 | 0 | 0 | 0 |
-| Clip | 16 | 1 | 15 | 0 | 0 | 0 |
+| Clip | 16 | 7 | 9 | 0 | 0 | 0 |
 | Col2Im | 5 | 0 | 5 | 0 | 0 | 0 |
 | Compress | 4 | 0 | 4 | 0 | 0 | 0 |
 | Concat | 133 | 13 | 120 | 0 | 0 | 0 |
 | ConcatFromSequence | 2 | 0 | 2 | 0 | 0 | 0 |
-| Constant | 274 | 34 | 240 | 0 | 0 | 0 |
+| Constant | 274 | 36 | 238 | 0 | 0 | 0 |
 | ConstantOfShape | 72 | 0 | 72 | 0 | 0 | 0 |
 | Conv | 33 | 27 | 6 | 0 | 0 | 0 |
 | ConvInteger | 2 | 0 | 2 | 0 | 0 | 0 |
@@ -132,7 +132,7 @@ A case using N distinct ops contributes to N rows.
 | LabelEncoder | 4 | 0 | 4 | 0 | 0 | 0 |
 | LayerNormalization | 19 | 0 | 19 | 0 | 0 | 0 |
 | LeakyRelu | 5 | 5 | 0 | 0 | 0 | 0 |
-| Less | 53 | 36 | 17 | 0 | 0 | 0 |
+| Less | 53 | 42 | 11 | 0 | 0 | 0 |
 | LessOrEqual | 8 | 8 | 0 | 0 | 0 | 0 |
 | Log | 32 | 4 | 28 | 0 | 0 | 0 |
 | LogSoftmax | 44 | 10 | 34 | 0 | 0 | 0 |
@@ -144,14 +144,14 @@ A case using N distinct ops contributes to N rows.
 | Max | 28 | 19 | 9 | 0 | 0 | 0 |
 | MaxPool | 28 | 22 | 6 | 0 | 0 | 0 |
 | MaxUnpool | 2 | 0 | 2 | 0 | 0 | 0 |
-| Mean | 3 | 0 | 3 | 0 | 0 | 0 |
+| Mean | 3 | 3 | 0 | 0 | 0 | 0 |
 | MeanVarianceNormalization | 1 | 0 | 1 | 0 | 0 | 0 |
 | MelWeightMatrix | 1 | 0 | 1 | 0 | 0 | 0 |
 | Min | 21 | 18 | 3 | 0 | 0 | 0 |
 | Mish | 1 | 0 | 1 | 0 | 0 | 0 |
 | Mod | 75 | 9 | 66 | 0 | 0 | 0 |
 | Momentum | 3 | 0 | 3 | 0 | 0 | 0 |
-| Mul | 207 | 33 | 174 | 0 | 0 | 0 |
+| Mul | 207 | 35 | 172 | 0 | 0 | 0 |
 | Neg | 46 | 8 | 38 | 0 | 0 | 0 |
 | NegativeLogLikelihoodLoss | 52 | 0 | 52 | 0 | 0 | 0 |
 | NonMaxSuppression | 9 | 0 | 9 | 0 | 0 | 0 |
@@ -235,11 +235,11 @@ A case using N distinct ops contributes to N rows.
 | TopK | 7 | 0 | 7 | 0 | 0 | 0 |
 | Transpose | 117 | 10 | 107 | 0 | 0 | 0 |
 | TreeEnsemble | 2 | 0 | 2 | 0 | 0 | 0 |
-| Trilu | 18 | 0 | 18 | 0 | 0 | 0 |
+| Trilu | 18 | 10 | 8 | 0 | 0 | 0 |
 | Unique | 6 | 0 | 6 | 0 | 0 | 0 |
 | Unsqueeze | 101 | 2 | 99 | 0 | 0 | 0 |
 | Upsample | 1 | 0 | 1 | 0 | 0 | 0 |
-| Where | 97 | 22 | 75 | 0 | 0 | 0 |
+| Where | 97 | 28 | 69 | 0 | 0 | 0 |
 | Xor | 8 | 8 | 0 | 0 | 0 | 0 |
 
 

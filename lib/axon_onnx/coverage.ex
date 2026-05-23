@@ -71,8 +71,13 @@ defmodule AxonOnnx.Coverage do
 
     try do
       {model, params} = AxonOnnx.import(model_path)
-      inputs = Axon.get_inputs(model)
-      input_keys = Map.keys(inputs)
+
+      # Use the proto's graph.input order, NOT Map.keys(Axon.get_inputs/1)
+      # which is alphabetical. The corpus' input_N.pb files are numbered to
+      # match the proto's graph.input order; mapping them by Map.keys yields
+      # scrambled assignments for any model whose input names aren't already
+      # alphabetical (e.g. Trilu's [x, k]).
+      proto_input_names = proto_input_names(model_path)
 
       Enum.each(data_paths, fn data_path ->
         input_paths = data_path |> Path.join("input_*.pb") |> Path.wildcard() |> Enum.sort()
@@ -81,7 +86,7 @@ defmodule AxonOnnx.Coverage do
         inp_tensors =
           input_paths
           |> Enum.map(&pb_to_tensor/1)
-          |> Enum.zip(input_keys)
+          |> Enum.zip(proto_input_names)
           |> Map.new(fn {v, k} -> {k, v} end)
 
         out_tensors = Enum.map(output_paths, &pb_to_tensor/1)
@@ -122,6 +127,22 @@ defmodule AxonOnnx.Coverage do
 
   defp normalize_error(%{__exception__: true} = e), do: Exception.message(e)
   defp normalize_error(other), do: inspect(other)
+
+  defp proto_input_names(model_path) do
+    # Some ONNX exports list initializers alongside true model inputs in
+    # `graph.input`. The deserializer filters initializers out, so we mirror
+    # that here: keep only inputs whose name isn't also in `graph.initializer`.
+    model =
+      model_path
+      |> File.read!()
+      |> Onnx.ModelProto.decode!()
+
+    init_names = MapSet.new(model.graph.initializer, & &1.name)
+
+    model.graph.input
+    |> Enum.map(& &1.name)
+    |> Enum.reject(&MapSet.member?(init_names, &1))
+  end
 
   @doc false
   def pb_to_tensor(pb_path) do
