@@ -154,7 +154,13 @@ defmodule AxonOnnx.Coverage do
     end
   end
 
-  defp to_nx_tensor([], <<>>, _, _), do: raise("unsupported empty Nx tensor")
+  defp to_nx_tensor([], <<>>, _, _) do
+    # Nx 0.5 cannot represent zero-element tensors. The corpus uses these
+    # for CastLike's `like` (dtype-only) input and ReduceSum's empty `axes`
+    # input. Until Nx ≥ 0.6 we can't comparison-test these cases — they
+    # surface as expected failures via the registry.
+    raise "unsupported empty Nx tensor"
+  end
 
   defp to_nx_tensor([], raw, type, shape) do
     raw |> Nx.from_binary(type) |> Nx.reshape(shape)

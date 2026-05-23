@@ -7,8 +7,8 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 489 | 27.3% |
-| unsupported | 1304 | 72.7% |
+| passing | 518 | 28.9% |
+| unsupported | 1275 | 71.1% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -17,8 +17,8 @@ Total cases: **1793**
 
 **node** — 1653 cases
 
-- passing: 396
-- unsupported: 1257
+- passing: 425
+- unsupported: 1228
 
 **pytorch-converted** — 82 cases
 
@@ -42,12 +42,12 @@ A case using N distinct ops contributes to N rows.
 
 | op_type | cases | passing | unsupported | known_bug | regression | newly_passing |
 |---|---|---|---|---|---|---|
-| Abs | 13 | 2 | 11 | 0 | 0 | 0 |
+| Abs | 13 | 4 | 9 | 0 | 0 | 0 |
 | Acos | 2 | 2 | 0 | 0 | 0 | 0 |
 | Acosh | 2 | 2 | 0 | 0 | 0 | 0 |
 | Adagrad | 2 | 0 | 2 | 0 | 0 | 0 |
 | Adam | 2 | 0 | 2 | 0 | 0 | 0 |
-| Add | 175 | 14 | 161 | 0 | 0 | 0 |
+| Add | 175 | 23 | 152 | 0 | 0 | 0 |
 | AffineGrid | 4 | 0 | 4 | 0 | 0 | 0 |
 | And | 70 | 8 | 62 | 0 | 0 | 0 |
 | ArgMax | 16 | 16 | 0 | 0 | 0 | 0 |
@@ -69,7 +69,7 @@ A case using N distinct ops contributes to N rows.
 | BitwiseXor | 4 | 0 | 4 | 0 | 0 | 0 |
 | BlackmanWindow | 2 | 0 | 2 | 0 | 0 | 0 |
 | Cast | 284 | 7 | 277 | 0 | 0 | 0 |
-| CastLike | 108 | 0 | 108 | 0 | 0 | 0 |
+| CastLike | 108 | 27 | 81 | 0 | 0 | 0 |
 | Ceil | 4 | 2 | 2 | 0 | 0 | 0 |
 | Celu | 1 | 1 | 0 | 0 | 0 | 0 |
 | CenterCropPad | 6 | 0 | 6 | 0 | 0 | 0 |
@@ -78,7 +78,7 @@ A case using N distinct ops contributes to N rows.
 | Compress | 4 | 0 | 4 | 0 | 0 | 0 |
 | Concat | 133 | 13 | 120 | 0 | 0 | 0 |
 | ConcatFromSequence | 2 | 0 | 2 | 0 | 0 | 0 |
-| Constant | 274 | 7 | 267 | 0 | 0 | 0 |
+| Constant | 274 | 34 | 240 | 0 | 0 | 0 |
 | ConstantOfShape | 72 | 0 | 72 | 0 | 0 | 0 |
 | Conv | 33 | 27 | 6 | 0 | 0 | 0 |
 | ConvInteger | 2 | 0 | 2 | 0 | 0 | 0 |
@@ -91,14 +91,14 @@ A case using N distinct ops contributes to N rows.
 | DepthToSpace | 2 | 0 | 2 | 0 | 0 | 0 |
 | DequantizeLinear | 14 | 0 | 14 | 0 | 0 | 0 |
 | Det | 2 | 0 | 2 | 0 | 0 | 0 |
-| Div | 184 | 6 | 178 | 0 | 0 | 0 |
+| Div | 184 | 10 | 174 | 0 | 0 | 0 |
 | Dropout | 12 | 3 | 9 | 0 | 0 | 0 |
 | DynamicQuantizeLinear | 3 | 0 | 3 | 0 | 0 | 0 |
 | Einsum | 6 | 0 | 6 | 0 | 0 | 0 |
 | Elu | 5 | 5 | 0 | 0 | 0 | 0 |
 | Equal | 99 | 24 | 75 | 0 | 0 | 0 |
-| Erf | 3 | 1 | 2 | 0 | 0 | 0 |
-| Exp | 49 | 4 | 45 | 0 | 0 | 0 |
+| Erf | 3 | 3 | 0 | 0 | 0 | 0 |
+| Exp | 49 | 12 | 37 | 0 | 0 | 0 |
 | Expand | 68 | 0 | 68 | 0 | 0 | 0 |
 | EyeLike | 3 | 2 | 1 | 0 | 0 | 0 |
 | Flatten | 49 | 5 | 44 | 0 | 0 | 0 |
@@ -132,27 +132,27 @@ A case using N distinct ops contributes to N rows.
 | LabelEncoder | 4 | 0 | 4 | 0 | 0 | 0 |
 | LayerNormalization | 19 | 0 | 19 | 0 | 0 | 0 |
 | LeakyRelu | 5 | 5 | 0 | 0 | 0 | 0 |
-| Less | 53 | 22 | 31 | 0 | 0 | 0 |
+| Less | 53 | 36 | 17 | 0 | 0 | 0 |
 | LessOrEqual | 8 | 8 | 0 | 0 | 0 | 0 |
-| Log | 32 | 2 | 30 | 0 | 0 | 0 |
+| Log | 32 | 4 | 28 | 0 | 0 | 0 |
 | LogSoftmax | 44 | 10 | 34 | 0 | 0 | 0 |
 | Loop | 11 | 0 | 11 | 0 | 0 | 0 |
 | LpNormalization | 6 | 0 | 6 | 0 | 0 | 0 |
 | LpPool | 8 | 0 | 8 | 0 | 0 | 0 |
 | MatMul | 74 | 5 | 69 | 0 | 0 | 0 |
 | MatMulInteger | 1 | 0 | 1 | 0 | 0 | 0 |
-| Max | 28 | 15 | 13 | 0 | 0 | 0 |
+| Max | 28 | 19 | 9 | 0 | 0 | 0 |
 | MaxPool | 28 | 22 | 6 | 0 | 0 | 0 |
 | MaxUnpool | 2 | 0 | 2 | 0 | 0 | 0 |
 | Mean | 3 | 0 | 3 | 0 | 0 | 0 |
 | MeanVarianceNormalization | 1 | 0 | 1 | 0 | 0 | 0 |
 | MelWeightMatrix | 1 | 0 | 1 | 0 | 0 | 0 |
-| Min | 21 | 15 | 6 | 0 | 0 | 0 |
+| Min | 21 | 18 | 3 | 0 | 0 | 0 |
 | Mish | 1 | 0 | 1 | 0 | 0 | 0 |
 | Mod | 75 | 9 | 66 | 0 | 0 | 0 |
 | Momentum | 3 | 0 | 3 | 0 | 0 | 0 |
-| Mul | 207 | 16 | 191 | 0 | 0 | 0 |
-| Neg | 46 | 6 | 40 | 0 | 0 | 0 |
+| Mul | 207 | 33 | 174 | 0 | 0 | 0 |
+| Neg | 46 | 8 | 38 | 0 | 0 | 0 |
 | NegativeLogLikelihoodLoss | 52 | 0 | 52 | 0 | 0 | 0 |
 | NonMaxSuppression | 9 | 0 | 9 | 0 | 0 | 0 |
 | NonZero | 1 | 0 | 1 | 0 | 0 | 0 |
@@ -163,7 +163,7 @@ A case using N distinct ops contributes to N rows.
 | Or | 24 | 24 | 0 | 0 | 0 | 0 |
 | PRelu | 8 | 0 | 8 | 0 | 0 | 0 |
 | Pad | 18 | 2 | 16 | 0 | 0 | 0 |
-| Pow | 17 | 13 | 4 | 0 | 0 | 0 |
+| Pow | 17 | 15 | 2 | 0 | 0 | 0 |
 | QLinearConv | 1 | 0 | 1 | 0 | 0 | 0 |
 | QLinearMatMul | 8 | 0 | 8 | 0 | 0 | 0 |
 | QuantizeLinear | 16 | 0 | 16 | 0 | 0 | 0 |
@@ -205,11 +205,11 @@ A case using N distinct ops contributes to N rows.
 | SequenceMap | 6 | 0 | 6 | 0 | 0 | 0 |
 | Shape | 180 | 10 | 170 | 0 | 0 | 0 |
 | Shrink | 3 | 0 | 3 | 0 | 0 | 0 |
-| Sigmoid | 8 | 5 | 3 | 0 | 0 | 0 |
+| Sigmoid | 8 | 6 | 2 | 0 | 0 | 0 |
 | Sign | 2 | 2 | 0 | 0 | 0 | 0 |
 | Sin | 2 | 2 | 0 | 0 | 0 | 0 |
 | Sinh | 2 | 2 | 0 | 0 | 0 | 0 |
-| Size | 63 | 0 | 63 | 0 | 0 | 0 |
+| Size | 63 | 2 | 61 | 0 | 0 | 0 |
 | Slice | 83 | 0 | 83 | 0 | 0 | 0 |
 | Softmax | 73 | 11 | 62 | 0 | 0 | 0 |
 | SoftmaxCrossEntropyLoss | 34 | 0 | 34 | 0 | 0 | 0 |
@@ -218,16 +218,16 @@ A case using N distinct ops contributes to N rows.
 | SpaceToDepth | 2 | 0 | 2 | 0 | 0 | 0 |
 | Split | 27 | 1 | 26 | 0 | 0 | 0 |
 | SplitToSequence | 6 | 0 | 6 | 0 | 0 | 0 |
-| Sqrt | 139 | 3 | 136 | 0 | 0 | 0 |
+| Sqrt | 139 | 7 | 132 | 0 | 0 | 0 |
 | Squeeze | 34 | 2 | 32 | 0 | 0 | 0 |
 | StringConcat | 5 | 0 | 5 | 0 | 0 | 0 |
 | StringNormalizer | 12 | 0 | 12 | 0 | 0 | 0 |
 | StringSplit | 6 | 0 | 6 | 0 | 0 | 0 |
-| Sub | 121 | 11 | 110 | 0 | 0 | 0 |
-| Sum | 8 | 4 | 4 | 0 | 0 | 0 |
+| Sub | 121 | 19 | 102 | 0 | 0 | 0 |
+| Sum | 8 | 8 | 0 | 0 | 0 | 0 |
 | Swish | 1 | 0 | 1 | 0 | 0 | 0 |
 | Tan | 2 | 2 | 0 | 0 | 0 | 0 |
-| Tanh | 16 | 6 | 10 | 0 | 0 | 0 |
+| Tanh | 16 | 8 | 8 | 0 | 0 | 0 |
 | TensorScatter | 3 | 0 | 3 | 0 | 0 | 0 |
 | TfIdfVectorizer | 7 | 0 | 7 | 0 | 0 | 0 |
 | ThresholdedRelu | 3 | 0 | 3 | 0 | 0 | 0 |
@@ -239,7 +239,7 @@ A case using N distinct ops contributes to N rows.
 | Unique | 6 | 0 | 6 | 0 | 0 | 0 |
 | Unsqueeze | 101 | 2 | 99 | 0 | 0 | 0 |
 | Upsample | 1 | 0 | 1 | 0 | 0 | 0 |
-| Where | 97 | 8 | 89 | 0 | 0 | 0 |
+| Where | 97 | 22 | 75 | 0 | 0 | 0 |
 | Xor | 8 | 8 | 0 | 0 | 0 | 0 |
 
 

@@ -639,6 +639,46 @@ defmodule AxonOnnx.Deserialize do
   end
 
   defp recur_nodes(
+         %Node{op_type: "CastLike", input: [inp_name, like_name], output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    inp = input!(inp_name, axon, params, used_params)
+    like = input!(like_name, axon, params, used_params)
+
+    target_type =
+      case get_axon_node(like) do
+        %Axon.Node{op: :constant, opts: [value: v]} -> {:static, Nx.type(v)}
+        %Nx.Tensor{} = t -> {:static, Nx.type(t)}
+        %Axon.Node{} -> :runtime
+      end
+
+    layer =
+      case {get_axon_node(inp), target_type} do
+        {%Axon.Node{op: :constant, opts: [value: v]}, {:static, t}} ->
+          Axon.constant(Nx.as_type(v, t), name: output_name)
+
+        {%Nx.Tensor{} = v, {:static, t}} ->
+          Axon.constant(Nx.as_type(v, t), name: output_name)
+
+        {%Axon.Node{}, {:static, t}} ->
+          Axon.layer(fn x, _opts -> Nx.as_type(x, t) end, [inp],
+            name: output_name,
+            op_name: :cast_like
+          )
+
+        {%Axon.Node{}, :runtime} ->
+          Axon.layer(fn x, like_tensor, _opts -> Nx.as_type(x, Nx.type(like_tensor)) end,
+            [inp, like],
+            name: output_name,
+            op_name: :cast_like
+          )
+      end
+
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
          %Node{op_type: "LRN", input: [input], attribute: attrs, output: [output_name]},
          {axon, params, used_params}
        ) do
@@ -1502,6 +1542,37 @@ defmodule AxonOnnx.Deserialize do
 
     updated_axon = Map.put(axon, output_name, layer)
 
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{op_type: "Size", input: [inp_name], output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    input = input!(inp_name, axon, params, used_params)
+
+    fun = fn t -> Nx.tensor(Nx.size(t), type: {:s, 64}) end
+
+    layer =
+      case get_axon_node(input) do
+        %Axon.Node{op: :constant, opts: [value: v]} ->
+          Axon.constant(fun.(v), name: output_name)
+
+        %Nx.Tensor{} = t ->
+          Axon.constant(fun.(t), name: output_name)
+
+        %Axon.Node{} ->
+          layer_inputs =
+            input
+            |> Axon.get_inputs()
+            |> Map.new(fn {k, v} -> {k, Nx.broadcast(0.0, v)} end)
+
+          shape = Axon.get_output_shape(input, layer_inputs)
+          template = Nx.template(shape, {:f, 32})
+          Axon.constant(fun.(template), name: output_name)
+      end
+
+    updated_axon = Map.put(axon, output_name, layer)
     {updated_axon, params, used_params}
   end
 
