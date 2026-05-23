@@ -552,6 +552,108 @@ defmodule AxonOnnx.Serialize do
     {:tanh, "Tanh"}
   ]
 
+  ## Concatenate (Axon.concatenate)
+
+  # Axon.concatenate(parents, axis: a) emits a :concatenate node with a
+  # single container parent holding the tuple of input nodes.
+  defp to_onnx(
+         %Axon.Node{
+           id: id,
+           op: :concatenate,
+           name: name_fn,
+           parent: [container_id],
+           opts: opts
+         },
+         nodes_map,
+         templates,
+         inputs,
+         param_names,
+         nodes,
+         op_counts,
+         cache
+       ) do
+    %Axon.Node{op: :container, parent: [children_tuple]} = nodes_map[container_id]
+    child_ids = Tuple.to_list(children_tuple)
+    axis = Keyword.fetch!(opts, :axis)
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      Enum.reduce(child_ids, {inputs, param_names, nodes, op_counts, cache}, fn cid,
+                                                                                 {is, pn, ns, oc, ca} ->
+        to_onnx(nodes_map[cid], nodes_map, templates, is, pn, ns, oc, ca)
+      end)
+
+    {name, op_counts, cache} =
+      case cache do
+        %{^id => name} ->
+          {name, op_counts, cache}
+
+        %{} ->
+          name = name_fn.(:concatenate, op_counts)
+          op_counts = Map.update(op_counts, :concatenate, 1, fn x -> x + 1 end)
+          cache = Map.put(cache, id, name)
+          {name, op_counts, cache}
+      end
+
+    node = %Node{
+      input: Enum.map(child_ids, &cache[&1]),
+      output: [name],
+      name: name,
+      op_type: "Concat",
+      attribute: [to_attr("axis", :INT, axis)]
+    }
+
+    {inputs, param_names, [node | nodes], op_counts, cache}
+  end
+
+  ## Cast (Axon.layer with op_name :cast and :to option)
+
+  defp to_onnx(
+         %Axon.Node{
+           id: id,
+           op: op,
+           op_name: :cast,
+           name: name_fn,
+           parent: [inp_id],
+           opts: opts
+         },
+         nodes_map,
+         templates,
+         inputs,
+         param_names,
+         nodes,
+         op_counts,
+         cache
+       )
+       when is_function(op) do
+    target_type = Keyword.fetch!(opts, :to)
+    onnx_to = nx_type_to_onnx_type(target_type)
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[inp_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    {name, op_counts, cache} =
+      case cache do
+        %{^id => name} ->
+          {name, op_counts, cache}
+
+        %{} ->
+          name = name_fn.(:cast, op_counts)
+          op_counts = Map.update(op_counts, :cast, 1, fn x -> x + 1 end)
+          cache = Map.put(cache, id, name)
+          {name, op_counts, cache}
+      end
+
+    node = %Node{
+      input: [cache[inp_id]],
+      output: [name],
+      name: name,
+      op_type: "Cast",
+      attribute: [to_attr("to", :INT, onnx_to)]
+    }
+
+    {inputs, param_names, [node | nodes], op_counts, cache}
+  end
+
   ## Arithmetic binary ops (Axon.add / Axon.subtract / Axon.multiply)
 
   # These are produced by `Axon.add/2`, `Axon.subtract/2`, `Axon.multiply/2`,

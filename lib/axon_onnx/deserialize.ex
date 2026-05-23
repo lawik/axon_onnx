@@ -694,7 +694,14 @@ defmodule AxonOnnx.Deserialize do
           Map.put(axon, output_name, Axon.constant(new_value, name: output_name))
 
         %Axon.Node{} ->
-          layer = Axon.nx(inp, &Nx.as_type(&1, nx_type), name: output_name, op_name: :cast)
+          # Stash the target dtype in the layer's opts so the serializer can
+          # round-trip Cast — Axon.nx with a captured `&Nx.as_type(&1, t)`
+          # buries `t` inside the closure where Axon.Serialize can't see it.
+          fun = fn x, opts -> Nx.as_type(x, opts[:to]) end
+
+          layer =
+            Axon.layer(fun, [inp], name: output_name, op_name: :cast, to: nx_type)
+
           Map.put(axon, output_name, layer)
       end
 
