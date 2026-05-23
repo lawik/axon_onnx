@@ -139,6 +139,7 @@ defmodule AxonOnnx.Coverage.Registry do
     {"node", "test_concat_3d_axis_negative_2"} => {:passing, nil},
     {"node", "test_concat_3d_axis_negative_3"} => {:passing, nil},
     {"node", "test_constant"} => {:passing, nil},
+    {"node", "test_convinteger_without_padding"} => {:passing, nil},
     {"node", "test_convtranspose"} => {:passing, nil},
     {"node", "test_convtranspose_1d"} => {:passing, nil},
     {"node", "test_convtranspose_3d"} => {:passing, nil},
@@ -157,8 +158,11 @@ defmodule AxonOnnx.Coverage.Registry do
     {"node", "test_dropout_default"} => {:passing, nil},
     {"node", "test_dropout_default_old"} => {:passing, nil},
     {"node", "test_dropout_random_old"} => {:passing, nil},
+    {"node", "test_dynamicquantizelinear"} => {:passing, nil},
     {"node", "test_dynamicquantizelinear_expanded"} => {:passing, nil},
+    {"node", "test_dynamicquantizelinear_max_adjusted"} => {:passing, nil},
     {"node", "test_dynamicquantizelinear_max_adjusted_expanded"} => {:passing, nil},
+    {"node", "test_dynamicquantizelinear_min_adjusted"} => {:passing, nil},
     {"node", "test_dynamicquantizelinear_min_adjusted_expanded"} => {:passing, nil},
     {"node", "test_elu"} => {:passing, nil},
     {"node", "test_elu_default"} => {:passing, nil},
@@ -321,6 +325,7 @@ defmodule AxonOnnx.Coverage.Registry do
     {"node", "test_matmul_2d"} => {:passing, nil},
     {"node", "test_matmul_3d"} => {:passing, nil},
     {"node", "test_matmul_4d"} => {:passing, nil},
+    {"node", "test_matmulinteger"} => {:passing, nil},
     {"node", "test_max_example"} => {:passing, nil},
     {"node", "test_max_float16"} => {:passing, nil},
     {"node", "test_max_float32"} => {:passing, nil},
@@ -432,12 +437,14 @@ defmodule AxonOnnx.Coverage.Registry do
     {"node", "test_prelu_broadcast_expanded"} => {:passing, nil},
     {"node", "test_prelu_example"} => {:passing, nil},
     {"node", "test_prelu_example_expanded"} => {:passing, nil},
+    {"node", "test_qlinearconv"} => {:passing, nil},
     {"node", "test_qlinearmatmul_2D_uint8_float16"} => {:passing, nil},
     {"node", "test_qlinearmatmul_2D_uint8_float32"} => {:passing, nil},
     {"node", "test_qlinearmatmul_3D_uint8_float16"} => {:passing, nil},
     {"node", "test_qlinearmatmul_3D_uint8_float32"} => {:passing, nil},
     {"node", "test_quantizelinear"} => {:passing, nil},
     {"node", "test_quantizelinear_axis"} => {:passing, nil},
+    {"node", "test_quantizelinear_uint16"} => {:passing, nil},
     {"node", "test_reciprocal"} => {:passing, nil},
     {"node", "test_reciprocal_example"} => {:passing, nil},
     {"node", "test_reduce_max_default_axes_keepdim_example"} => {:passing, nil},
@@ -692,12 +699,8 @@ defmodule AxonOnnx.Coverage.Registry do
     {"simple", "test_shrink"} => {:passing, nil},
     {"simple", "test_sign_model"} => {:passing, nil},
     {"simple", "test_single_relu_model"} => {:passing, nil},
-    {"node", "test_quantizelinear_uint16"} => {:passing, nil},
     {"node", "test_maxpool_2d_ceil"} =>
       {:unsupported, "MaxPool ceil_mode=1 unsupported by Axon.max_pool"},
-    # Known bugs — implemented but produce wrong outputs vs. the golden.
-    # Listed explicitly so future readers can distinguish them from
-    # not-yet-implemented ops.
     {"node", "test_convtranspose_dilations"} =>
       {:known_bug,
        "Axon.Layers.conv_transpose with kernel_dilation != 1 diverges from " <>
@@ -719,7 +722,9 @@ defmodule AxonOnnx.Coverage.Registry do
        "QLinearMatMul at s8 with float16 work-type loses precision in the " <>
          "intermediate scale/divide before re-quantising."},
     {"node", "test_qlinearmatmul_3D_int8_float32"} =>
-      {:known_bug, "Same s8 rounding mismatch as test_quantizelinear_int8."}
+      {:known_bug, "Same s8 rounding mismatch as test_quantizelinear_int8."},
+    {"node", "test_convinteger_with_padding"} =>
+      {:known_bug, "ConvInteger with non-zero padding diverges from golden."}
   }
 
   @doc "Returns the raw `{category, name} => {status, note}` map."

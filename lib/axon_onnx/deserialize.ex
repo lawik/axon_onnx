@@ -1603,6 +1603,203 @@ defmodule AxonOnnx.Deserialize do
 
   defp recur_nodes(
          %Node{
+           op_type: "QLinearConv",
+           attribute: attrs,
+           input: inputs,
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # QLinearConv = dequantize(x, w) → Conv (+ optional int bias scaled
+    # through x_scale*w_scale) → quantize(y_scale, y_zp).
+    [x_n, x_scale_n, x_zp_n, w_n, w_scale_n, w_zp_n, y_scale_n, y_zp_n | maybe_b] = inputs
+
+    options = options!(attrs)
+    auto_pad = options["auto_pad"] || "NOTSET"
+    group = options["group"] || 1
+    pads = options["pads"]
+
+    x = input!(x_n, axon, params, used_params)
+    x_scale = input!(x_scale_n, axon, params, used_params)
+    x_zp = input!(x_zp_n, axon, params, used_params)
+    w = input!(w_n, axon, params, used_params)
+    w_scale = input!(w_scale_n, axon, params, used_params)
+    w_zp = input!(w_zp_n, axon, params, used_params)
+    y_scale = input!(y_scale_n, axon, params, used_params)
+    y_zp = input!(y_zp_n, axon, params, used_params)
+    bias = if maybe_b != [], do: input!(hd(maybe_b), axon, params, used_params), else: nil
+
+    target_type = quantize_target_type(y_zp_n, y_zp)
+    {min_v, max_v} = quantize_range(target_type)
+
+    w_shape =
+      case w do
+        %Nx.Tensor{} = t -> Nx.shape(t)
+        %Axon{} = node -> kernel_shape_from_axon!(node)
+      end
+
+    kernel_size = w_shape |> Tuple.delete_at(0) |> Tuple.delete_at(0)
+    spatial_rank = tuple_size(kernel_size)
+    dilations = options["dilations"] || List.duplicate(1, spatial_rank)
+    strides = options["strides"] || List.duplicate(1, spatial_rank)
+    padding_config = padding!(auto_pad, pads, kernel_size, strides)
+
+    common_inputs = [x, x_scale, x_zp, w, w_scale, w_zp, y_scale, y_zp]
+
+    {fun, layer_inputs} =
+      case bias do
+        nil ->
+          {fn x, x_scale, x_zp, w, w_scale, w_zp, y_scale, y_zp, _opts ->
+             qlinear_conv_impl(
+               x, x_scale, x_zp, w, w_scale, w_zp, y_scale, y_zp, nil,
+               strides, padding_config, dilations, group, target_type, min_v, max_v
+             )
+           end, common_inputs}
+
+        _ ->
+          {fn x, x_scale, x_zp, w, w_scale, w_zp, y_scale, y_zp, b, _opts ->
+             qlinear_conv_impl(
+               x, x_scale, x_zp, w, w_scale, w_zp, y_scale, y_zp, b,
+               strides, padding_config, dilations, group, target_type, min_v, max_v
+             )
+           end, common_inputs ++ [bias]}
+      end
+
+    layer = Axon.layer(fun, layer_inputs, name: output_name, op_name: :qlinear_conv)
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{op_type: "MatMulInteger", input: inputs, output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    # MatMulInteger(A, B [, a_zero_point [, b_zero_point]]):
+    # Y = matmul(A - a_zero_point, B - b_zero_point) at int32.
+    {a_n, b_n, a_zp_n, b_zp_n} =
+      case inputs do
+        [a, b] -> {a, b, nil, nil}
+        [a, b, a_zp] -> {a, b, a_zp, nil}
+        [a, b, a_zp, b_zp] -> {a, b, a_zp, b_zp}
+      end
+
+    a = input!(a_n, axon, params, used_params)
+    b = input!(b_n, axon, params, used_params)
+    a_zp = if a_zp_n && a_zp_n != "", do: input!(a_zp_n, axon, params, used_params), else: nil
+    b_zp = if b_zp_n && b_zp_n != "", do: input!(b_zp_n, axon, params, used_params), else: nil
+
+    {fun, layer_inputs} = integer_matmul_layer(a, b, a_zp, b_zp)
+    layer = Axon.layer(fun, layer_inputs, name: output_name, op_name: :matmul_integer)
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "ConvInteger",
+           attribute: attrs,
+           input: inputs,
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # ConvInteger(x, w [, x_zp [, w_zp]]):
+    # Y = conv(x - x_zp, w - w_zp) at int32. Reuses the Conv attribute
+    # mapping (pads/auto_pad/dilations/strides/group).
+    {x_n, w_n, x_zp_n, w_zp_n} =
+      case inputs do
+        [x, w] -> {x, w, nil, nil}
+        [x, w, x_zp] -> {x, w, x_zp, nil}
+        [x, w, x_zp, w_zp] -> {x, w, x_zp, w_zp}
+      end
+
+    options = options!(attrs)
+    auto_pad = options["auto_pad"] || "NOTSET"
+    group = options["group"] || 1
+    pads = options["pads"]
+
+    x = input!(x_n, axon, params, used_params)
+    w = input!(w_n, axon, params, used_params)
+    x_zp = if x_zp_n && x_zp_n != "", do: input!(x_zp_n, axon, params, used_params), else: nil
+    w_zp = if w_zp_n && w_zp_n != "", do: input!(w_zp_n, axon, params, used_params), else: nil
+
+    w_shape =
+      case w do
+        %Nx.Tensor{} = t -> Nx.shape(t)
+        %Axon{} = node -> kernel_shape_from_axon!(node)
+      end
+
+    kernel_size = w_shape |> Tuple.delete_at(0) |> Tuple.delete_at(0)
+    spatial_rank = tuple_size(kernel_size)
+    dilations = options["dilations"] || List.duplicate(1, spatial_rank)
+    strides = options["strides"] || List.duplicate(1, spatial_rank)
+    padding_config = padding!(auto_pad, pads, kernel_size, strides)
+
+    fun = build_conv_integer_fun(x_zp, w_zp, strides, padding_config, dilations, group)
+    layer_inputs = [x, w] ++ Enum.reject([x_zp, w_zp], &is_nil/1)
+    layer = Axon.layer(fun, layer_inputs, name: output_name, op_name: :conv_integer)
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "DynamicQuantizeLinear",
+           input: [x_name],
+           output: outputs
+         },
+         {axon, params, used_params}
+       ) do
+    # DynamicQuantizeLinear computes a uint8 quantisation from the input
+    # tensor's own min/max (always including 0 in the represented range).
+    # Spec: opset 11+. Three outputs: y (u8), y_scale (f32), y_zero_point (u8).
+    [y_name, scale_name, zp_name] = outputs
+
+    x = input!(x_name, axon, params, used_params)
+
+    scale_fun = fn x, _opts ->
+      max_x = Nx.max(Nx.reduce_max(x), 0.0)
+      min_x = Nx.min(Nx.reduce_min(x), 0.0)
+      Nx.divide(Nx.subtract(max_x, min_x), 255.0)
+    end
+
+    zp_fun = fn x, _opts ->
+      max_x = Nx.max(Nx.reduce_max(x), 0.0)
+      min_x = Nx.min(Nx.reduce_min(x), 0.0)
+      scale = Nx.divide(Nx.subtract(max_x, min_x), 255.0)
+      raw = Nx.divide(Nx.negate(min_x), scale) |> Nx.round() |> Nx.clip(0, 255)
+      Nx.as_type(raw, {:u, 8})
+    end
+
+    y_fun = fn x, _opts ->
+      max_x = Nx.max(Nx.reduce_max(x), 0.0)
+      min_x = Nx.min(Nx.reduce_min(x), 0.0)
+      scale = Nx.divide(Nx.subtract(max_x, min_x), 255.0)
+      raw_zp = Nx.divide(Nx.negate(min_x), scale) |> Nx.round() |> Nx.clip(0, 255)
+      Nx.divide(x, scale)
+      |> Nx.round()
+      |> Nx.add(raw_zp)
+      |> Nx.clip(0, 255)
+      |> Nx.as_type({:u, 8})
+    end
+
+    axon =
+      axon
+      |> Map.put(y_name, Axon.layer(y_fun, [x], name: y_name, op_name: :dynamic_quantize_y))
+      |> Map.put(
+        scale_name,
+        Axon.layer(scale_fun, [x], name: scale_name, op_name: :dynamic_quantize_scale)
+      )
+      |> Map.put(
+        zp_name,
+        Axon.layer(zp_fun, [x], name: zp_name, op_name: :dynamic_quantize_zp)
+      )
+
+    {axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
            op_type: "DequantizeLinear",
            attribute: attrs,
            input: inputs,
@@ -3469,6 +3666,149 @@ defmodule AxonOnnx.Deserialize do
 
       "mean" ->
         Nx.divide(Nx.sum(masked_loss), Nx.sum(masked_weights))
+    end
+  end
+
+  defp qlinear_conv_impl(
+         x, x_scale, x_zp, w, w_scale, w_zp, y_scale, y_zp, bias,
+         strides, padding_config, dilations, group, target_type, min_v, max_v
+       ) do
+    work_type = Nx.type(x_scale)
+
+    x_f =
+      Nx.multiply(
+        Nx.subtract(Nx.as_type(x, work_type), Nx.as_type(x_zp, work_type)),
+        x_scale
+      )
+
+    w_f =
+      Nx.multiply(
+        Nx.subtract(Nx.as_type(w, work_type), Nx.as_type(w_zp, work_type)),
+        w_scale
+      )
+
+    y_f =
+      Axon.Layers.conv(x_f, w_f, 0,
+        strides: strides,
+        padding: padding_config,
+        kernel_dilation: dilations,
+        feature_group_size: group,
+        channels: :first
+      )
+
+    y_f =
+      if bias do
+        # Bias is int32 quantised by x_scale * w_scale; convert to float
+        # using that combined scale.
+        combined_scale = Nx.multiply(x_scale, w_scale)
+        bias_f = Nx.multiply(Nx.as_type(bias, work_type), combined_scale)
+        Nx.add(y_f, Nx.reshape(bias_f, conv_bias_broadcast_shape(Nx.shape(y_f), Nx.shape(bias_f))))
+      else
+        y_f
+      end
+
+    y_f
+    |> Nx.divide(y_scale)
+    |> Nx.round()
+    |> Nx.add(Nx.as_type(y_zp, work_type))
+    |> Nx.clip(min_v, max_v)
+    |> Nx.as_type(target_type)
+  end
+
+  defp conv_bias_broadcast_shape(out_shape, bias_shape) do
+    # Convolution bias is (C_out,); broadcast against y of shape
+    # (N, C_out, ...spatial) by inserting size-1 dims everywhere except
+    # the channel axis.
+    case bias_shape do
+      {_} ->
+        rank = tuple_size(out_shape)
+        List.duplicate(1, rank) |> List.to_tuple() |> put_elem(1, elem(bias_shape, 0))
+
+      _ ->
+        bias_shape
+    end
+  end
+
+  defp integer_matmul_layer(a, b, nil, nil) do
+    fun = fn a, b, _opts ->
+      Nx.dot(Nx.as_type(a, {:s, 32}), Nx.as_type(b, {:s, 32}))
+    end
+
+    {fun, [a, b]}
+  end
+
+  defp integer_matmul_layer(a, b, a_zp, nil) when not is_nil(a_zp) do
+    fun = fn a, b, a_zp, _opts ->
+      centered_a =
+        Nx.subtract(Nx.as_type(a, {:s, 32}), Nx.as_type(a_zp, {:s, 32}))
+
+      Nx.dot(centered_a, Nx.as_type(b, {:s, 32}))
+    end
+
+    {fun, [a, b, a_zp]}
+  end
+
+  defp integer_matmul_layer(a, b, nil, b_zp) when not is_nil(b_zp) do
+    fun = fn a, b, b_zp, _opts ->
+      centered_b =
+        Nx.subtract(Nx.as_type(b, {:s, 32}), Nx.as_type(b_zp, {:s, 32}))
+
+      Nx.dot(Nx.as_type(a, {:s, 32}), centered_b)
+    end
+
+    {fun, [a, b, b_zp]}
+  end
+
+  defp integer_matmul_layer(a, b, a_zp, b_zp) when not is_nil(a_zp) and not is_nil(b_zp) do
+    fun = fn a, b, a_zp, b_zp, _opts ->
+      centered_a = Nx.subtract(Nx.as_type(a, {:s, 32}), Nx.as_type(a_zp, {:s, 32}))
+      centered_b = Nx.subtract(Nx.as_type(b, {:s, 32}), Nx.as_type(b_zp, {:s, 32}))
+      Nx.dot(centered_a, centered_b)
+    end
+
+    {fun, [a, b, a_zp, b_zp]}
+  end
+
+  # The fun closes over the zero-points presence pattern so the runtime
+  # layer fn has the right arity.
+  defp build_conv_integer_fun(nil, nil, strides, padding, dilations, group) do
+    fn x, w, _opts ->
+      Axon.Layers.conv(Nx.as_type(x, {:s, 32}), Nx.as_type(w, {:s, 32}), 0,
+        strides: strides,
+        padding: padding,
+        kernel_dilation: dilations,
+        feature_group_size: group,
+        channels: :first
+      )
+    end
+  end
+
+  defp build_conv_integer_fun(_x_zp, nil, strides, padding, dilations, group) do
+    fn x, w, x_zp, _opts ->
+      centered_x = Nx.subtract(Nx.as_type(x, {:s, 32}), Nx.as_type(x_zp, {:s, 32}))
+
+      Axon.Layers.conv(centered_x, Nx.as_type(w, {:s, 32}), 0,
+        strides: strides,
+        padding: padding,
+        kernel_dilation: dilations,
+        feature_group_size: group,
+        channels: :first
+      )
+    end
+  end
+
+  defp build_conv_integer_fun(_x_zp, _w_zp, strides, padding, dilations, group) do
+    fn x, w, x_zp, w_zp, _opts ->
+      centered_x = Nx.subtract(Nx.as_type(x, {:s, 32}), Nx.as_type(x_zp, {:s, 32}))
+      centered_w = Nx.subtract(Nx.as_type(w, {:s, 32}), Nx.as_type(w_zp, {:s, 32}))
+
+      Axon.Layers.conv(centered_x, centered_w, 0,
+        strides: strides,
+        padding: padding,
+        kernel_dilation: dilations,
+        feature_group_size: group,
+        channels: :first
+      )
     end
   end
 

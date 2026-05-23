@@ -7,22 +7,22 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 674 | 37.6% |
-| unsupported | 1113 | 62.1% |
-| known_bug | 6 | 0.3% |
+| passing | 680 | 37.9% |
+| unsupported | 1106 | 61.7% |
+| known_bug | 7 | 0.4% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 ## Round-trip coverage
 
-Of the 674 cases that import cleanly, how many also export back to
+Of the 680 cases that import cleanly, how many also export back to
 ONNX and re-import with matching predictions (the full bidirectional
 Nx/Axon ⇄ ONNX path).
 
 | Classification | Count | % of import-passing |
 |---|---|---|
-| passing | 95 | 14.1% |
-| unsupported | 579 | 85.9% |
+| passing | 95 | 14.0% |
+| unsupported | 585 | 86.0% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -32,9 +32,9 @@ Nx/Axon ⇄ ONNX path).
 
 **node** — 1653 cases
 
-- passing: 580
-- unsupported: 1067
-- known_bug: 6
+- passing: 586
+- unsupported: 1060
+- known_bug: 7
 
 **pytorch-converted** — 82 cases
 
@@ -97,7 +97,7 @@ A case using N distinct ops contributes to N rows.
 | Constant | 274 | 39 | 235 | 0 | 0 | 0 |
 | ConstantOfShape | 72 | 0 | 72 | 0 | 0 | 0 |
 | Conv | 33 | 27 | 6 | 0 | 0 | 0 |
-| ConvInteger | 2 | 0 | 2 | 0 | 0 | 0 |
+| ConvInteger | 2 | 1 | 0 | 1 | 0 | 0 |
 | ConvTranspose | 14 | 4 | 9 | 1 | 0 | 0 |
 | Cos | 8 | 2 | 6 | 0 | 0 | 0 |
 | Cosh | 2 | 2 | 0 | 0 | 0 | 0 |
@@ -109,7 +109,7 @@ A case using N distinct ops contributes to N rows.
 | Det | 2 | 0 | 2 | 0 | 0 | 0 |
 | Div | 184 | 13 | 171 | 0 | 0 | 0 |
 | Dropout | 12 | 3 | 9 | 0 | 0 | 0 |
-| DynamicQuantizeLinear | 3 | 0 | 3 | 0 | 0 | 0 |
+| DynamicQuantizeLinear | 3 | 3 | 0 | 0 | 0 | 0 |
 | Einsum | 6 | 0 | 6 | 0 | 0 | 0 |
 | Elu | 5 | 5 | 0 | 0 | 0 | 0 |
 | Equal | 99 | 24 | 75 | 0 | 0 | 0 |
@@ -156,7 +156,7 @@ A case using N distinct ops contributes to N rows.
 | LpNormalization | 6 | 0 | 6 | 0 | 0 | 0 |
 | LpPool | 8 | 3 | 5 | 0 | 0 | 0 |
 | MatMul | 74 | 5 | 69 | 0 | 0 | 0 |
-| MatMulInteger | 1 | 0 | 1 | 0 | 0 | 0 |
+| MatMulInteger | 1 | 1 | 0 | 0 | 0 | 0 |
 | Max | 28 | 22 | 6 | 0 | 0 | 0 |
 | MaxPool | 28 | 22 | 6 | 0 | 0 | 0 |
 | MaxUnpool | 2 | 0 | 2 | 0 | 0 | 0 |
@@ -180,7 +180,7 @@ A case using N distinct ops contributes to N rows.
 | PRelu | 8 | 2 | 6 | 0 | 0 | 0 |
 | Pad | 18 | 2 | 16 | 0 | 0 | 0 |
 | Pow | 17 | 15 | 2 | 0 | 0 | 0 |
-| QLinearConv | 1 | 0 | 1 | 0 | 0 | 0 |
+| QLinearConv | 1 | 1 | 0 | 0 | 0 | 0 |
 | QLinearMatMul | 8 | 4 | 0 | 4 | 0 | 0 |
 | QuantizeLinear | 16 | 6 | 9 | 1 | 0 | 0 |
 | RMSNormalization | 19 | 19 | 0 | 0 | 0 | 0 |
