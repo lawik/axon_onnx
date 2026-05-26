@@ -439,7 +439,9 @@ defmodule AxonOnnx.Coverage.RoundTripRegistry do
     {"pytorch-operator", "test_operator_selu"} => {:passing, nil},
     {"pytorch-operator", "test_operator_sqrt"} => {:passing, nil},
     {"simple", "test_sign_model"} => {:passing, nil},
-    {"simple", "test_single_relu_model"} => {:passing, nil}
+    {"simple", "test_single_relu_model"} => {:passing, nil},
+    {"node", "test_constantofshape_float_ones"} => {:passing, nil},
+    {"node", "test_constantofshape_int_zeros"} => {:passing, nil}
   }
 
   @doc "Returns the raw `{category, name} => {status, note}` map."
