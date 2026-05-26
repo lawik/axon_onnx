@@ -623,6 +623,142 @@ defmodule AxonOnnx.Serialize do
     {inputs, param_names, [node | nodes], op_counts, cache}
   end
 
+  ## ReduceX (axes-driven reductions: ReduceSum/Mean/Max/Min/Prod/L1/L2/LogSum/LogSumExp/SumSquare)
+
+  # The deserialiser stores axes/keep_axes in opts. The :axes opt is absent
+  # when the model wanted \"reduce all\".
+  @reduce_to_onnx %{
+    reduce_l1: "ReduceL1",
+    reduce_l2: "ReduceL2",
+    reduce_log_sum: "ReduceLogSum",
+    reduce_log_sum_exp: "ReduceLogSumExp",
+    reduce_max: "ReduceMax",
+    reduce_mean: "ReduceMean",
+    reduce_min: "ReduceMin",
+    reduce_prod: "ReduceProd",
+    reduce_sum: "ReduceSum",
+    reduce_sum_square: "ReduceSumSquare"
+  }
+
+  defp to_onnx(
+         %Axon.Node{
+           id: id,
+           op: op,
+           op_name: op_name,
+           name: name_fn,
+           parent: [inp_id],
+           opts: opts
+         },
+         nodes_map,
+         templates,
+         inputs,
+         param_names,
+         nodes,
+         op_counts,
+         cache
+       )
+       when is_function(op) and is_map_key(@reduce_to_onnx, op_name) do
+    onnx_op = Map.fetch!(@reduce_to_onnx, op_name)
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[inp_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    {name, op_counts, cache} =
+      case cache do
+        %{^id => name} ->
+          {name, op_counts, cache}
+
+        %{} ->
+          name = name_fn.(op_name, op_counts)
+          op_counts = Map.update(op_counts, op_name, 1, fn x -> x + 1 end)
+          cache = Map.put(cache, id, name)
+          {name, op_counts, cache}
+      end
+
+    keep_axes = if Keyword.get(opts, :keep_axes, false), do: 1, else: 0
+    axes = Keyword.get(opts, :axes)
+
+    # Emit ONNX-style: opset 13+ ReduceSum takes axes as a second input;
+    # the older form took axes as an attribute. Use the attribute form
+    # (simpler, opset-13-clean for the others too since axes is constant).
+    attrs =
+      [to_attr("keepdims", :INT, keep_axes)] ++
+        if(axes, do: [to_attr("axes", :INTS, axes)], else: [])
+
+    node = %Node{
+      input: [cache[inp_id]],
+      output: [name],
+      name: name,
+      op_type: onnx_op,
+      attribute: attrs
+    }
+
+    {inputs, param_names, [node | nodes], op_counts, cache}
+  end
+
+  ## ArgMax / ArgMin (Axon.layer with op_name and :axis / :keep_axis / :tie_break opts)
+
+  @argopts_to_onnx %{argmax: "ArgMax", argmin: "ArgMin"}
+
+  defp to_onnx(
+         %Axon.Node{
+           id: id,
+           op: op,
+           op_name: op_name,
+           name: name_fn,
+           parent: [inp_id],
+           opts: opts
+         },
+         nodes_map,
+         templates,
+         inputs,
+         param_names,
+         nodes,
+         op_counts,
+         cache
+       )
+       when is_function(op) and is_map_key(@argopts_to_onnx, op_name) do
+    onnx_op = Map.fetch!(@argopts_to_onnx, op_name)
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[inp_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    {name, op_counts, cache} =
+      case cache do
+        %{^id => name} ->
+          {name, op_counts, cache}
+
+        %{} ->
+          name = name_fn.(op_name, op_counts)
+          op_counts = Map.update(op_counts, op_name, 1, fn x -> x + 1 end)
+          cache = Map.put(cache, id, name)
+          {name, op_counts, cache}
+      end
+
+    axis = Keyword.get(opts, :axis, 0)
+    keepdims = if Keyword.get(opts, :keep_axis, true), do: 1, else: 0
+
+    select_last =
+      case Keyword.get(opts, :tie_break, :low) do
+        :low -> 0
+        :high -> 1
+      end
+
+    node = %Node{
+      input: [cache[inp_id]],
+      output: [name],
+      name: name,
+      op_type: onnx_op,
+      attribute: [
+        to_attr("axis", :INT, axis),
+        to_attr("keepdims", :INT, keepdims),
+        to_attr("select_last_index", :INT, select_last)
+      ]
+    }
+
+    {inputs, param_names, [node | nodes], op_counts, cache}
+  end
+
   ## Cast (Axon.layer with op_name :cast and :to option)
 
   defp to_onnx(

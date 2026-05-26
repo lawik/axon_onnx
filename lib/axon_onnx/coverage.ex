@@ -155,6 +155,7 @@ defmodule AxonOnnx.Coverage do
     try do
       {model_a, params_a} = AxonOnnx.import(model_path)
       proto_input_names = proto_input_names(model_path)
+      axon_input_names = MapSet.new(Map.keys(Axon.get_inputs(model_a)))
 
       input_templates =
         model_a
@@ -167,11 +168,13 @@ defmodule AxonOnnx.Coverage do
       Enum.each(data_paths, fn data_path ->
         input_paths = data_path |> Path.join("input_*.pb") |> Path.wildcard() |> Enum.sort()
 
+        # Same filter as run_case/2 — skip proto inputs the Axon model
+        # folded into the static dispatch (e.g. empty axes for ReduceSum).
         inp_tensors =
           input_paths
-          |> Enum.map(&pb_to_tensor/1)
           |> Enum.zip(proto_input_names)
-          |> Map.new(fn {v, k} -> {k, v} end)
+          |> Enum.filter(fn {_path, name} -> MapSet.member?(axon_input_names, name) end)
+          |> Map.new(fn {path, name} -> {name, pb_to_tensor(path)} end)
 
         out_a = Axon.predict(model_a, params_a, inp_tensors)
         out_b = Axon.predict(model_b, params_b, inp_tensors)
