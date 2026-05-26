@@ -623,6 +623,106 @@ defmodule AxonOnnx.Serialize do
     {inputs, param_names, [node | nodes], op_counts, cache}
   end
 
+  ## Hardmax (Axon.layer with op_name :hardmax and :axis opt)
+
+  defp to_onnx(
+         %Axon.Node{
+           id: id,
+           op: op,
+           op_name: :hardmax,
+           name: name_fn,
+           parent: [inp_id],
+           opts: opts
+         },
+         nodes_map,
+         templates,
+         inputs,
+         param_names,
+         nodes,
+         op_counts,
+         cache
+       )
+       when is_function(op) do
+    axis = Keyword.fetch!(opts, :axis)
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[inp_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    {name, op_counts, cache} =
+      case cache do
+        %{^id => name} ->
+          {name, op_counts, cache}
+
+        %{} ->
+          name = name_fn.(:hardmax, op_counts)
+          op_counts = Map.update(op_counts, :hardmax, 1, fn x -> x + 1 end)
+          cache = Map.put(cache, id, name)
+          {name, op_counts, cache}
+      end
+
+    node = %Node{
+      input: [cache[inp_id]],
+      output: [name],
+      name: name,
+      op_type: "Hardmax",
+      attribute: [to_attr("axis", :INT, axis)]
+    }
+
+    {inputs, param_names, [node | nodes], op_counts, cache}
+  end
+
+  ## Transpose (Axon.transpose atom op with :axes opt)
+
+  defp to_onnx(
+         %Axon.Node{
+           id: id,
+           op: :transpose,
+           name: name_fn,
+           parent: [inp_id],
+           opts: opts
+         },
+         nodes_map,
+         templates,
+         inputs,
+         param_names,
+         nodes,
+         op_counts,
+         cache
+       ) do
+    axes = Keyword.get(opts, :axes)
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[inp_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    {name, op_counts, cache} =
+      case cache do
+        %{^id => name} ->
+          {name, op_counts, cache}
+
+        %{} ->
+          name = name_fn.(:transpose, op_counts)
+          op_counts = Map.update(op_counts, :transpose, 1, fn x -> x + 1 end)
+          cache = Map.put(cache, id, name)
+          {name, op_counts, cache}
+      end
+
+    attrs =
+      case axes do
+        nil -> []
+        list when is_list(list) -> [to_attr("perm", :INTS, list)]
+      end
+
+    node = %Node{
+      input: [cache[inp_id]],
+      output: [name],
+      name: name,
+      op_type: "Transpose",
+      attribute: attrs
+    }
+
+    {inputs, param_names, [node | nodes], op_counts, cache}
+  end
+
   ## Where (Axon.layer with op_name :select, three inputs)
 
   defp to_onnx(

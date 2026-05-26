@@ -2188,18 +2188,20 @@ defmodule AxonOnnx.Deserialize do
          {axon, params, used_params}
        ) do
     # Hardmax: 1.0 at the argmax position along axis, 0.0 elsewhere. The
-    # output has the same dtype as the input.
+    # output has the same dtype as the input. axis is lifted into opts
+    # so the serializer can round-trip the attribute.
     axis = options!(attrs)["axis"] || -1
     input = input!(input_name, axon, params, used_params)
 
-    fun = fn x, _opts ->
-      argmax = Nx.argmax(x, axis: axis, keep_axis: true)
-      iota = Nx.iota(Nx.shape(x), axis: axis)
+    fun = fn x, opts ->
+      ax = opts[:axis]
+      argmax = Nx.argmax(x, axis: ax, keep_axis: true)
+      iota = Nx.iota(Nx.shape(x), axis: ax)
       mask = Nx.equal(iota, argmax)
       Nx.as_type(mask, Nx.type(x))
     end
 
-    layer = Axon.layer(fun, [input], name: output_name, op_name: :hardmax)
+    layer = Axon.layer(fun, [input], name: output_name, op_name: :hardmax, axis: axis)
     updated_axon = Map.put(axon, output_name, layer)
     {updated_axon, params, used_params}
   end
