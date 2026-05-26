@@ -623,6 +623,57 @@ defmodule AxonOnnx.Serialize do
     {inputs, param_names, [node | nodes], op_counts, cache}
   end
 
+  ## BitShift (Axon.layer with op_name :bitshift and :direction opt)
+
+  defp to_onnx(
+         %Axon.Node{
+           id: id,
+           op: op,
+           op_name: :bitshift,
+           name: name_fn,
+           parent: [a_id, b_id],
+           opts: opts
+         },
+         nodes_map,
+         templates,
+         inputs,
+         param_names,
+         nodes,
+         op_counts,
+         cache
+       )
+       when is_function(op) do
+    direction = Keyword.fetch!(opts, :direction)
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[a_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[b_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    {name, op_counts, cache} =
+      case cache do
+        %{^id => name} ->
+          {name, op_counts, cache}
+
+        %{} ->
+          name = name_fn.(:bitshift, op_counts)
+          op_counts = Map.update(op_counts, :bitshift, 1, fn x -> x + 1 end)
+          cache = Map.put(cache, id, name)
+          {name, op_counts, cache}
+      end
+
+    node = %Node{
+      input: [cache[a_id], cache[b_id]],
+      output: [name],
+      name: name,
+      op_type: "BitShift",
+      attribute: [to_attr("direction", :STRING, direction)]
+    }
+
+    {inputs, param_names, [node | nodes], op_counts, cache}
+  end
+
   ## Reshape (Axon.reshape atom op with :shape opt)
 
   defp to_onnx(

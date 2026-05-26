@@ -631,9 +631,10 @@ defmodule AxonOnnx.Deserialize do
     inp2 = input!(inp2_name, axon, params, used_params)
 
     bitshift_options = options!(attrs)
+    direction = bitshift_options["direction"]
 
-    fun = fn x, y, _opts ->
-      case bitshift_options["direction"] do
+    fun = fn x, y, opts ->
+      case opts[:direction] do
         "LEFT" -> Nx.left_shift(Nx.as_type(x, {:s, 64}), Nx.as_type(y, {:s, 64}))
         "RIGHT" -> Nx.right_shift(Nx.as_type(x, {:s, 64}), Nx.as_type(y, {:s, 64}))
       end
@@ -643,23 +644,29 @@ defmodule AxonOnnx.Deserialize do
       case {get_axon_node(inp1), get_axon_node(inp2)} do
         {%Axon.Node{op: :constant, opts: [value: v1]},
          %Axon.Node{op: :constant, opts: [value: v2]}} ->
-          new_value = apply(fun, [v1, v2, []])
+          new_value = apply(fun, [v1, v2, [direction: direction]])
           {Map.put(axon, output_name, Axon.constant(new_value, name: output_name)), used_params}
 
         {%Axon.Node{op: :constant, opts: [value: v1]}, %Nx.Tensor{} = v2} ->
-          new_value = apply(fun, [v1, v2, []])
+          new_value = apply(fun, [v1, v2, [direction: direction]])
           {Map.put(axon, output_name, Axon.constant(new_value, name: output_name)), used_params}
 
         {%Nx.Tensor{} = v1, %Axon.Node{op: :constant, opts: [value: v2]}} ->
-          new_value = apply(fun, [v1, v2, []])
+          new_value = apply(fun, [v1, v2, [direction: direction]])
           {Map.put(axon, output_name, Axon.constant(new_value, name: output_name)), used_params}
 
         {%Nx.Tensor{} = v1, %Nx.Tensor{} = v2} ->
-          new_value = apply(fun, [v1, v2, []])
+          new_value = apply(fun, [v1, v2, [direction: direction]])
           {Map.put(axon, output_name, Axon.constant(new_value, name: output_name)), used_params}
 
         {%Axon.Node{}, %Axon.Node{}} ->
-          layer = Axon.layer(fun, [inp1, inp2], name: output_name, op_name: :bitshift)
+          layer =
+            Axon.layer(fun, [inp1, inp2],
+              name: output_name,
+              op_name: :bitshift,
+              direction: direction
+            )
+
           {Map.put(axon, output_name, layer), used_params}
 
         {%Axon.Node{}, %Nx.Tensor{}} ->

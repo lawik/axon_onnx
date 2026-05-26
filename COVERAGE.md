@@ -21,8 +21,8 @@ Nx/Axon ⇄ ONNX path).
 
 | Classification | Count | % of import-passing |
 |---|---|---|
-| passing | 435 | 54.9% |
-| unsupported | 357 | 45.1% |
+| passing | 443 | 55.9% |
+| unsupported | 349 | 44.1% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
