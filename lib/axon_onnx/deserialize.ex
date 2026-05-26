@@ -18,6 +18,7 @@ defmodule AxonOnnx.Deserialize do
 
   @opsets_key {__MODULE__, :opsets}
   @input_types_key {__MODULE__, :input_types}
+  @output_shapes_key {__MODULE__, :output_shapes}
 
   def __load__(binary, opts \\ []) do
     binary
@@ -28,8 +29,10 @@ defmodule AxonOnnx.Deserialize do
   defp to_axon(%Model{graph: %Graph{} = graph, opset_import: opset_imports}, dimensions) do
     opsets = build_opsets(opset_imports)
     input_types = build_input_types(graph)
+    output_shapes = build_output_shapes(graph)
     previous_opsets = Process.put(@opsets_key, opsets)
     previous_input_types = Process.put(@input_types_key, input_types)
+    previous_output_shapes = Process.put(@output_shapes_key, output_shapes)
 
     try do
       {graph, params} = graph_to_axon(graph, dimensions)
@@ -46,6 +49,7 @@ defmodule AxonOnnx.Deserialize do
     after
       restore_dict(@opsets_key, previous_opsets)
       restore_dict(@input_types_key, previous_input_types)
+      restore_dict(@output_shapes_key, previous_output_shapes)
     end
   end
 
@@ -99,6 +103,45 @@ defmodule AxonOnnx.Deserialize do
           acc
       end
     end)
+  end
+
+  defp build_output_shapes(%Graph{output: outputs}) do
+    Enum.reduce(outputs, %{}, fn %Value{name: name, type: %Type{value: value}}, acc ->
+      case value do
+        {:tensor_type, %Placeholder{shape: %Shape{dim: dims}}} ->
+          shape_list =
+            Enum.map(dims, fn %Dimension{value: v} ->
+              case v do
+                {:dim_value, n} -> n
+                _ -> nil
+              end
+            end)
+
+          if Enum.all?(shape_list, &is_integer/1) do
+            Map.put(acc, name, List.to_tuple(shape_list))
+          else
+            acc
+          end
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  @doc """
+  Statically-declared shape for a graph output, or `nil`. Available for the
+  lifetime of an `AxonOnnx.import/2` / `load/2` call. Useful when a model
+  declares its output shape but builds it from runtime inputs (e.g.
+  `ConstantOfShape` whose `shape` input is a graph input but whose result
+  shape is fixed in `graph.output`).
+  """
+  @spec output_shape(String.t()) :: tuple() | nil
+  def output_shape(name) when is_binary(name) do
+    case Process.get(@output_shapes_key) do
+      nil -> nil
+      map -> Map.get(map, name)
+    end
   end
 
   @doc """
@@ -2312,14 +2355,28 @@ defmodule AxonOnnx.Deserialize do
     value = tensor!(constant_options["value"])
 
     shape =
-      shape
-      |> constant!(axon, params, used_params)
-      |> Nx.to_flat_list()
-      |> Enum.map(fn
-        -1 -> 1
-        x -> x
-      end)
-      |> List.to_tuple()
+      cond do
+        constant_resolvable?(shape, axon, params, used_params) ->
+          shape
+          |> constant!(axon, params, used_params)
+          |> Nx.to_flat_list()
+          |> Enum.map(fn
+            -1 -> 1
+            x -> x
+          end)
+          |> List.to_tuple()
+
+        out_shape = output_shape(output_name) ->
+          # Shape input is a runtime graph input, but the model declares the
+          # output shape — use that to construct the constant.
+          out_shape
+
+        true ->
+          raise ArgumentError,
+                "ConstantOfShape needs either a constant shape input " <>
+                  "or a statically-declared output shape; neither is available " <>
+                  "for output #{inspect(output_name)}."
+      end
 
     val = Nx.broadcast(value, shape)
 
@@ -2336,11 +2393,6 @@ defmodule AxonOnnx.Deserialize do
     allowzero = reshape_options["allowzero"] || 0
     inp = axon!(inp, axon)
 
-    # Reshape is a constant value input that MUST be known
-    # ahead of time so we can build a static graph, we can't
-    # support any other reshape types
-    shape = constant!(shape, axon, params, used_params)
-
     # We currently do not support zero sized dimensions
     if allowzero == 1 do
       Logger.warning(
@@ -2350,17 +2402,31 @@ defmodule AxonOnnx.Deserialize do
     end
 
     new_shape =
-      shape
-      |> Nx.to_flat_list()
-      |> Enum.reduce({[], false}, fn
-        0, {cur_shape, already_auto?} -> {cur_shape, already_auto?}
-        -1, {cur_shape, false} -> {[:auto | cur_shape], true}
-        -1, {cur_shape, true} -> {[1 | cur_shape], true}
-        x, {cur_shape, already_auto?} -> {[x | cur_shape], already_auto?}
-      end)
-      |> elem(0)
-      |> Enum.reverse()
-      |> List.to_tuple()
+      cond do
+        constant_resolvable?(shape, axon, params, used_params) ->
+          shape
+          |> constant!(axon, params, used_params)
+          |> Nx.to_flat_list()
+          |> Enum.reduce({[], false}, fn
+            0, {cur_shape, already_auto?} -> {cur_shape, already_auto?}
+            -1, {cur_shape, false} -> {[:auto | cur_shape], true}
+            -1, {cur_shape, true} -> {[1 | cur_shape], true}
+            x, {cur_shape, already_auto?} -> {[x | cur_shape], already_auto?}
+          end)
+          |> elem(0)
+          |> Enum.reverse()
+          |> List.to_tuple()
+
+        out_shape = output_shape(output_name) ->
+          # Shape input is runtime, but the model declares the output shape.
+          out_shape
+
+        true ->
+          raise ArgumentError,
+                "Reshape requires either a constant shape input or a " <>
+                  "statically-declared output shape; got neither for " <>
+                  "#{inspect(output_name)}."
+      end
 
     updated_axon =
       case get_axon_node(inp) do
@@ -2384,16 +2450,28 @@ defmodule AxonOnnx.Deserialize do
          {axon, params, used_params}
        ) do
     inp = input!(inp, axon, params, used_params)
-    shape = constant!(shape, axon, params, used_params)
 
     shape =
-      shape
-      |> Nx.to_flat_list()
-      |> Enum.map(fn
-        -1 -> 1
-        x -> x
-      end)
-      |> List.to_tuple()
+      cond do
+        constant_resolvable?(shape, axon, params, used_params) ->
+          shape
+          |> constant!(axon, params, used_params)
+          |> Nx.to_flat_list()
+          |> Enum.map(fn
+            -1 -> 1
+            x -> x
+          end)
+          |> List.to_tuple()
+
+        out_shape = output_shape(output_name) ->
+          out_shape
+
+        true ->
+          raise ArgumentError,
+                "Expand requires either a constant shape input or a " <>
+                  "statically-declared output shape; got neither for " <>
+                  "#{inspect(output_name)}."
+      end
 
     updated_axon =
       case get_axon_node(inp) do
@@ -2743,6 +2821,16 @@ defmodule AxonOnnx.Deserialize do
       end
 
     {updated_axon, params, updated_params}
+  end
+
+  # True when a named input can be resolved to a concrete tensor at import
+  # time (initializer, Constant op, or already-consumed param). Used by
+  # shape-driven ops that can fall back on declared output shapes when their
+  # shape inputs are runtime.
+  defp constant_resolvable?(name, axon, params, used_params) do
+    Map.has_key?(params, name) or Map.has_key?(used_params, name) or
+      (Map.has_key?(axon, name) and
+         match?(%Axon.Node{op: :constant}, get_axon_node(axon[name])))
   end
 
   # Resolve the axes input of a 2-input reduction (opset 13+/18+ form).

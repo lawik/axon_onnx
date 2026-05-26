@@ -7,24 +7,24 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 771 | 43.0% |
-| unsupported | 1019 | 56.8% |
+| passing | 788 | 43.9% |
+| unsupported | 1002 | 55.9% |
 | known_bug | 3 | 0.2% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 ## Round-trip coverage
 
-Of the 771 cases that import cleanly, how many also export back to
+Of the 788 cases that import cleanly, how many also export back to
 ONNX and re-import with matching predictions (the full bidirectional
 Nx/Axon ⇄ ONNX path).
 
 | Classification | Count | % of import-passing |
 |---|---|---|
-| passing | 424 | 55.0% |
-| unsupported | 347 | 45.0% |
+| passing | 424 | 53.8% |
+| unsupported | 362 | 45.9% |
 | known_bug | 0 | 0.0% |
-| newly_passing | 0 | 0.0% |
+| newly_passing | 2 | 0.3% |
 | regression | 0 | 0.0% |
 
 
@@ -32,8 +32,8 @@ Nx/Axon ⇄ ONNX path).
 
 **node** — 1653 cases
 
-- passing: 669
-- unsupported: 981
+- passing: 682
+- unsupported: 968
 - known_bug: 3
 
 **pytorch-converted** — 82 cases
@@ -48,8 +48,8 @@ Nx/Axon ⇄ ONNX path).
 
 **simple** — 23 cases
 
-- passing: 3
-- unsupported: 20
+- passing: 7
+- unsupported: 16
 
 ## Per-operator breakdown
 
@@ -95,7 +95,7 @@ A case using N distinct ops contributes to N rows.
 | Concat | 133 | 13 | 120 | 0 | 0 | 0 |
 | ConcatFromSequence | 2 | 0 | 2 | 0 | 0 | 0 |
 | Constant | 274 | 88 | 186 | 0 | 0 | 0 |
-| ConstantOfShape | 72 | 0 | 72 | 0 | 0 | 0 |
+| ConstantOfShape | 72 | 2 | 70 | 0 | 0 | 0 |
 | Conv | 33 | 27 | 6 | 0 | 0 | 0 |
 | ConvInteger | 2 | 1 | 0 | 1 | 0 | 0 |
 | ConvTranspose | 14 | 4 | 9 | 1 | 0 | 0 |
@@ -115,7 +115,7 @@ A case using N distinct ops contributes to N rows.
 | Equal | 99 | 24 | 75 | 0 | 0 | 0 |
 | Erf | 3 | 3 | 0 | 0 | 0 | 0 |
 | Exp | 49 | 42 | 7 | 0 | 0 | 0 |
-| Expand | 68 | 0 | 68 | 0 | 0 | 0 |
+| Expand | 68 | 6 | 62 | 0 | 0 | 0 |
 | EyeLike | 3 | 2 | 1 | 0 | 0 | 0 |
 | Flatten | 49 | 5 | 44 | 0 | 0 | 0 |
 | Floor | 2 | 2 | 0 | 0 | 0 | 0 |
@@ -200,7 +200,7 @@ A case using N distinct ops contributes to N rows.
 | ReduceSumSquare | 9 | 2 | 7 | 0 | 0 | 0 |
 | RegexFullMatch | 3 | 0 | 3 | 0 | 0 | 0 |
 | Relu | 5 | 3 | 2 | 0 | 0 | 0 |
-| Reshape | 160 | 1 | 159 | 0 | 0 | 0 |
+| Reshape | 160 | 10 | 150 | 0 | 0 | 0 |
 | Resize | 39 | 0 | 39 | 0 | 0 | 0 |
 | ReverseSequence | 2 | 0 | 2 | 0 | 0 | 0 |
 | RoiAlign | 3 | 0 | 3 | 0 | 0 | 0 |
