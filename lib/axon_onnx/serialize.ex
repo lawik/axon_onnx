@@ -623,6 +623,162 @@ defmodule AxonOnnx.Serialize do
     {inputs, param_names, [node | nodes], op_counts, cache}
   end
 
+  ## Where (Axon.layer with op_name :select, three inputs)
+
+  defp to_onnx(
+         %Axon.Node{
+           id: id,
+           op: op,
+           op_name: :select,
+           name: name_fn,
+           parent: [c_id, t_id, f_id]
+         },
+         nodes_map,
+         templates,
+         inputs,
+         param_names,
+         nodes,
+         op_counts,
+         cache
+       )
+       when is_function(op) do
+    {inputs, param_names, nodes, op_counts, cache} =
+      Enum.reduce([c_id, t_id, f_id], {inputs, param_names, nodes, op_counts, cache},
+        fn pid, {is, pn, ns, oc, ca} ->
+          to_onnx(nodes_map[pid], nodes_map, templates, is, pn, ns, oc, ca)
+        end)
+
+    {name, op_counts, cache} =
+      case cache do
+        %{^id => name} ->
+          {name, op_counts, cache}
+
+        %{} ->
+          name = name_fn.(:select, op_counts)
+          op_counts = Map.update(op_counts, :select, 1, fn x -> x + 1 end)
+          cache = Map.put(cache, id, name)
+          {name, op_counts, cache}
+      end
+
+    node = %Node{
+      input: [cache[c_id], cache[t_id], cache[f_id]],
+      output: [name],
+      name: name,
+      op_type: "Where",
+      attribute: []
+    }
+
+    {inputs, param_names, [node | nodes], op_counts, cache}
+  end
+
+  ## MatMul (Axon.layer with op_name :numpy_matmul, two inputs)
+
+  defp to_onnx(
+         %Axon.Node{
+           id: id,
+           op: op,
+           op_name: :numpy_matmul,
+           name: name_fn,
+           parent: [a_id, b_id]
+         },
+         nodes_map,
+         templates,
+         inputs,
+         param_names,
+         nodes,
+         op_counts,
+         cache
+       )
+       when is_function(op) do
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[a_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[b_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    {name, op_counts, cache} =
+      case cache do
+        %{^id => name} ->
+          {name, op_counts, cache}
+
+        %{} ->
+          name = name_fn.(:numpy_matmul, op_counts)
+          op_counts = Map.update(op_counts, :numpy_matmul, 1, fn x -> x + 1 end)
+          cache = Map.put(cache, id, name)
+          {name, op_counts, cache}
+      end
+
+    node = %Node{
+      input: [cache[a_id], cache[b_id]],
+      output: [name],
+      name: name,
+      op_type: "MatMul",
+      attribute: []
+    }
+
+    {inputs, param_names, [node | nodes], op_counts, cache}
+  end
+
+  ## Variadic Sum / Max / Min (Axon.layer with op_name :add/:max/:min, container parent)
+
+  @variadic_axon_to_onnx %{add: "Sum", max: "Max", min: "Min"}
+
+  defp to_onnx(
+         %Axon.Node{
+           id: id,
+           op: op,
+           op_name: op_name,
+           name: name_fn,
+           parent: [container_id]
+         },
+         nodes_map,
+         templates,
+         inputs,
+         param_names,
+         nodes,
+         op_counts,
+         cache
+       )
+       when is_function(op) and is_map_key(@variadic_axon_to_onnx, op_name) do
+    onnx_op = Map.fetch!(@variadic_axon_to_onnx, op_name)
+
+    child_ids =
+      case nodes_map[container_id] do
+        %Axon.Node{op: :container, parent: [children_tuple]} ->
+          Tuple.to_list(children_tuple)
+
+        %Axon.Node{parent: ids} when is_list(ids) ->
+          ids
+      end
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      Enum.reduce(child_ids, {inputs, param_names, nodes, op_counts, cache}, fn cid, {is, pn, ns, oc, ca} ->
+        to_onnx(nodes_map[cid], nodes_map, templates, is, pn, ns, oc, ca)
+      end)
+
+    {name, op_counts, cache} =
+      case cache do
+        %{^id => name} ->
+          {name, op_counts, cache}
+
+        %{} ->
+          name = name_fn.(op_name, op_counts)
+          op_counts = Map.update(op_counts, op_name, 1, fn x -> x + 1 end)
+          cache = Map.put(cache, id, name)
+          {name, op_counts, cache}
+      end
+
+    node = %Node{
+      input: Enum.map(child_ids, &cache[&1]),
+      output: [name],
+      name: name,
+      op_type: onnx_op,
+      attribute: []
+    }
+
+    {inputs, param_names, [node | nodes], op_counts, cache}
+  end
+
   ## BitShift (Axon.layer with op_name :bitshift and :direction opt)
 
   defp to_onnx(
