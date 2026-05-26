@@ -554,6 +554,7 @@ defmodule AxonOnnx.Serialize do
     {:hard_sigmoid, "HardSigmoid"},
     {:leaky_relu, "LeakyRelu"},
     {:linear, "Identity"},
+    {:log_softmax, "LogSoftmax"},
     {:relu, "Relu"},
     {:sigmoid, "Sigmoid"},
     {:selu, "Selu"},
@@ -562,6 +563,10 @@ defmodule AxonOnnx.Serialize do
     {:softsign, "Softsign"},
     {:tanh, "Tanh"}
   ]
+
+  # Activations whose ONNX form carries an axis attribute. Read from
+  # the Axon node's opts and emit as ONNX 'axis' INT.
+  @axis_aware_activations [:softmax, :log_softmax]
 
   ## Concatenate (Axon.concatenate)
 
@@ -1381,7 +1386,7 @@ defmodule AxonOnnx.Serialize do
 
   for {op, onnx_op} <- @supported_activations do
     defp to_onnx(
-           %Axon.Node{id: id, op: unquote(op), name: name_fn, parent: [inp_id]},
+           %Axon.Node{id: id, op: unquote(op), name: name_fn, parent: [inp_id], opts: layer_opts},
            nodes_map,
            templates,
            inputs,
@@ -1416,13 +1421,19 @@ defmodule AxonOnnx.Serialize do
             {name, op_counts, cache}
         end
 
-      node_inputs = [input_name]
+      attrs =
+        if unquote(op) in @axis_aware_activations and Keyword.has_key?(layer_opts, :axis) do
+          [to_attr("axis", :INT, Keyword.fetch!(layer_opts, :axis))]
+        else
+          []
+        end
 
       node = %Node{
-        input: node_inputs,
+        input: [input_name],
         output: [name],
         name: name,
-        op_type: unquote(onnx_op)
+        op_type: unquote(onnx_op),
+        attribute: attrs
       }
 
       {inputs, param_names, [node | nodes], op_counts, cache}
