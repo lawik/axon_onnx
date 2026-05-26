@@ -2526,6 +2526,58 @@ defmodule AxonOnnx.Deserialize do
   end
 
   defp recur_nodes(
+         %Node{op_type: "Tile", input: [inp_name, repeats_name], output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    # Tile repeats `inp` along each axis per `repeats`. The repeats can come
+    # in as an initializer (resolved here) or as a graph input; in the
+    # latter case the corpus declares the output shape, and we derive
+    # repeats from output_shape / input_shape per dim.
+    inp = input!(inp_name, axon, params, used_params)
+
+    repeats =
+      cond do
+        constant_resolvable?(repeats_name, axon, params, used_params) ->
+          repeats_name
+          |> constant!(axon, params, used_params)
+          |> Nx.to_flat_list()
+
+        out_shape = output_shape(output_name) ->
+          in_shape =
+            case inp do
+              %Nx.Tensor{} = t -> Nx.shape(t)
+              %Axon{} = node -> kernel_shape_from_axon!(node)
+            end
+
+          Enum.zip(Tuple.to_list(in_shape), Tuple.to_list(out_shape))
+          |> Enum.map(fn {i, o} -> div(o, max(i, 1)) end)
+
+        true ->
+          raise ArgumentError,
+                "Tile needs either a constant repeats input or static input " <>
+                  "+ output shapes; got neither for #{inspect(output_name)}."
+      end
+
+    layer =
+      case get_axon_node(inp) do
+        %Axon.Node{op: :constant, opts: [value: v]} ->
+          Axon.constant(Nx.tile(v, repeats), name: output_name)
+
+        %Nx.Tensor{} = v ->
+          Axon.constant(Nx.tile(v, repeats), name: output_name)
+
+        %Axon.Node{} ->
+          Axon.layer(fn x, _opts -> Nx.tile(x, repeats) end, [inp],
+            name: output_name,
+            op_name: :tile
+          )
+      end
+
+    updated_axon = Map.put(axon, output_name, layer)
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
          %Node{op_type: "Slice", input: [inp, starts, ends], output: [output_name]},
          {axon, params, used_params}
        ) do

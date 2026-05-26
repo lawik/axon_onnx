@@ -7,24 +7,24 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 788 | 43.9% |
-| unsupported | 1002 | 55.9% |
+| passing | 792 | 44.2% |
+| unsupported | 998 | 55.7% |
 | known_bug | 3 | 0.2% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 ## Round-trip coverage
 
-Of the 788 cases that import cleanly, how many also export back to
+Of the 792 cases that import cleanly, how many also export back to
 ONNX and re-import with matching predictions (the full bidirectional
 Nx/Axon ⇄ ONNX path).
 
 | Classification | Count | % of import-passing |
 |---|---|---|
-| passing | 424 | 53.8% |
-| unsupported | 362 | 45.9% |
+| passing | 435 | 54.9% |
+| unsupported | 357 | 45.1% |
 | known_bug | 0 | 0.0% |
-| newly_passing | 2 | 0.3% |
+| newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 
@@ -32,8 +32,8 @@ Nx/Axon ⇄ ONNX path).
 
 **node** — 1653 cases
 
-- passing: 682
-- unsupported: 968
+- passing: 684
+- unsupported: 966
 - known_bug: 3
 
 **pytorch-converted** — 82 cases
@@ -43,8 +43,8 @@ Nx/Axon ⇄ ONNX path).
 
 **pytorch-operator** — 35 cases
 
-- passing: 29
-- unsupported: 6
+- passing: 31
+- unsupported: 4
 
 **simple** — 23 cases
 
@@ -94,7 +94,7 @@ A case using N distinct ops contributes to N rows.
 | Compress | 4 | 0 | 4 | 0 | 0 | 0 |
 | Concat | 133 | 13 | 120 | 0 | 0 | 0 |
 | ConcatFromSequence | 2 | 0 | 2 | 0 | 0 | 0 |
-| Constant | 274 | 88 | 186 | 0 | 0 | 0 |
+| Constant | 274 | 90 | 184 | 0 | 0 | 0 |
 | ConstantOfShape | 72 | 2 | 70 | 0 | 0 | 0 |
 | Conv | 33 | 27 | 6 | 0 | 0 | 0 |
 | ConvInteger | 2 | 1 | 0 | 1 | 0 | 0 |
@@ -200,7 +200,7 @@ A case using N distinct ops contributes to N rows.
 | ReduceSumSquare | 9 | 2 | 7 | 0 | 0 | 0 |
 | RegexFullMatch | 3 | 0 | 3 | 0 | 0 | 0 |
 | Relu | 5 | 3 | 2 | 0 | 0 | 0 |
-| Reshape | 160 | 10 | 150 | 0 | 0 | 0 |
+| Reshape | 160 | 11 | 149 | 0 | 0 | 0 |
 | Resize | 39 | 0 | 39 | 0 | 0 | 0 |
 | ReverseSequence | 2 | 0 | 2 | 0 | 0 | 0 |
 | RoiAlign | 3 | 0 | 3 | 0 | 0 | 0 |
@@ -247,7 +247,7 @@ A case using N distinct ops contributes to N rows.
 | TensorScatter | 3 | 0 | 3 | 0 | 0 | 0 |
 | TfIdfVectorizer | 7 | 0 | 7 | 0 | 0 | 0 |
 | ThresholdedRelu | 3 | 0 | 3 | 0 | 0 | 0 |
-| Tile | 4 | 0 | 4 | 0 | 0 | 0 |
+| Tile | 4 | 4 | 0 | 0 | 0 | 0 |
 | TopK | 7 | 0 | 7 | 0 | 0 | 0 |
 | Transpose | 117 | 10 | 107 | 0 | 0 | 0 |
 | TreeEnsemble | 2 | 0 | 2 | 0 | 0 | 0 |

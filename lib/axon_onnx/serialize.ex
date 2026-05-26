@@ -623,6 +623,67 @@ defmodule AxonOnnx.Serialize do
     {inputs, param_names, [node | nodes], op_counts, cache}
   end
 
+  ## Reshape (Axon.reshape atom op with :shape opt)
+
+  defp to_onnx(
+         %Axon.Node{
+           id: id,
+           op: :reshape,
+           name: name_fn,
+           parent: [inp_id],
+           opts: opts
+         },
+         nodes_map,
+         templates,
+         inputs,
+         param_names,
+         nodes,
+         op_counts,
+         cache
+       ) do
+    shape = Keyword.fetch!(opts, :shape) |> Tuple.to_list()
+
+    {inputs, param_names, nodes, op_counts, cache} =
+      to_onnx(nodes_map[inp_id], nodes_map, templates, inputs, param_names, nodes, op_counts, cache)
+
+    {name, op_counts, cache} =
+      case cache do
+        %{^id => name} ->
+          {name, op_counts, cache}
+
+        %{} ->
+          name = name_fn.(:reshape, op_counts)
+          op_counts = Map.update(op_counts, :reshape, 1, fn x -> x + 1 end)
+          cache = Map.put(cache, id, name)
+          {name, op_counts, cache}
+      end
+
+    # Emit Reshape with the shape baked into a Constant. Opset 5+ takes
+    # shape as an input, not an attribute, so we materialise the shape as
+    # an initializer-bound input.
+    shape_name = name <> "_shape"
+    shape_tensor = nx_to_tensor_proto(shape_name, Nx.tensor(shape, type: {:s, 64}))
+    value_attr = to_attr("value", :TENSOR, shape_tensor)
+
+    constant_node = %Node{
+      input: [],
+      output: [shape_name],
+      name: shape_name,
+      op_type: "Constant",
+      attribute: [value_attr]
+    }
+
+    reshape_node = %Node{
+      input: [cache[inp_id], shape_name],
+      output: [name],
+      name: name,
+      op_type: "Reshape",
+      attribute: []
+    }
+
+    {inputs, param_names, [reshape_node, constant_node | nodes], op_counts, cache}
+  end
+
   ## ReduceX (axes-driven reductions: ReduceSum/Mean/Max/Min/Prod/L1/L2/LogSum/LogSumExp/SumSquare)
 
   # The deserialiser stores axes/keep_axes in opts. The :axes opt is absent

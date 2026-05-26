@@ -441,7 +441,16 @@ defmodule AxonOnnx.Coverage.RoundTripRegistry do
     {"simple", "test_sign_model"} => {:passing, nil},
     {"simple", "test_single_relu_model"} => {:passing, nil},
     {"node", "test_constantofshape_float_ones"} => {:passing, nil},
-    {"node", "test_constantofshape_int_zeros"} => {:passing, nil}
+    {"node", "test_constantofshape_int_zeros"} => {:passing, nil},
+    {"node", "test_reshape_extended_dims"} => {:passing, nil},
+    {"node", "test_reshape_negative_dim"} => {:passing, nil},
+    {"node", "test_reshape_negative_extended_dims"} => {:passing, nil},
+    {"node", "test_reshape_one_dim"} => {:passing, nil},
+    {"node", "test_reshape_reduced_dims"} => {:passing, nil},
+    {"node", "test_reshape_reordered_all_dims"} => {:passing, nil},
+    {"node", "test_reshape_reordered_last_dims"} => {:passing, nil},
+    {"node", "test_reshape_zero_and_negative_dim"} => {:passing, nil},
+    {"node", "test_reshape_zero_dim"} => {:passing, nil}
   }
 
   @doc "Returns the raw `{category, name} => {status, note}` map."

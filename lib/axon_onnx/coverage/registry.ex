@@ -810,7 +810,11 @@ defmodule AxonOnnx.Coverage.Registry do
     {"node", "test_convinteger_with_padding"} => {:known_bug, "ConvInteger with non-zero padding diverges from golden."},
     {"node", "test_convtranspose_dilations"} => {:known_bug, "Axon.Layers.conv_transpose with kernel_dilation != 1 diverges from ONNX spec; see commit 06eb8bb."},
     {"node", "test_maxpool_2d_ceil"} => {:unsupported, "MaxPool ceil_mode=1 unsupported by Axon.max_pool"},
-    {"node", "test_qlinearmatmul_3D_int8_float16"} => {:known_bug, "QLinearMatMul s8/float16: float16 intermediate precision causes one row of golden output to differ by 1 ULP. The s8 saturate-vs-wrap fix (commit removing Nx.clip) handles the overflow path; the remaining divergence is genuine float16 precision loss in the scale/divide step before requantisation."}
+    {"node", "test_qlinearmatmul_3D_int8_float16"} => {:known_bug, "QLinearMatMul s8/float16: float16 intermediate precision causes one row of golden output to differ by 1 ULP. The s8 saturate-vs-wrap fix (commit removing Nx.clip) handles the overflow path; the remaining divergence is genuine float16 precision loss in the scale/divide step before requantisation."},
+    {"node", "test_tile"} => {:passing, nil},
+    {"node", "test_tile_precomputed"} => {:passing, nil},
+    {"pytorch-operator", "test_operator_repeat"} => {:passing, nil},
+    {"pytorch-operator", "test_operator_repeat_dim_overflow"} => {:passing, nil}
   }
 
   @doc "Returns the raw `{category, name} => {status, note}` map."
