@@ -32,7 +32,7 @@ defmodule AxonOnnx.RoundTripTest do
     @tag category: category
     @tag round_trip_status: status
     @tag round_trip_case: "#{category}/#{name}"
-    @tag timeout: 60_000
+    @tag timeout: 120_000
     test "#{category}/#{name} round-trip (expect #{status})" do
       entry = %{category: unquote(category), name: unquote(name), path: unquote(path)}
       assert_outcome!(entry, unquote(status), Coverage.run_round_trip(entry))

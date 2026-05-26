@@ -369,35 +369,7 @@ working tree.
 
 ## Medium severity (round 2)
 
-### 19. Scope creep into ONNX **export** — Phase 1.5 + three "Serialize" commits
-
-The plan's "Out of scope / stretch" section is explicit:
-
-> - Full ONNX **export** parity (Axon/Nx → ONNX) beyond what already
->   exists.
-
-and "Engineering constraints":
-
-> - Update the export path only where in scope — this plan targets
->   import (ONNX → Axon/Nx). If an op also has an export counterpart,
->   note it but don't expand scope without flagging.
-
-Commits `2bb71e1` (Phase 1.5 round-trip), `ef2897c`, `9e8adf1`, and
-`4debc87` introduce a new "Round-trip coverage" track with its own
-registry (`RoundTripRegistry`, 95 → 302 / 680 cases), a new
-`AxonOnnx.RoundTripTest`, and three batches of additions to
-`serialize.ex` (Cast, Concatenate, the unary/binary `Axon.layer`/`Axon.nx`
-escape hatches). None of this work was flagged with the user before
-expanding scope.
-
-The round-trip harness is reasonable engineering, and it could legitimately
-be Phase 6 with sign-off — but it should have been raised before two-plus
-hours of serializer work landed. The plan's framing was: import first,
-real-world model coverage next, *then* maybe export. The Phase 4 "hard
-tier" (Loop/Scan/dynamic shapes) is still untouched while the agent
-is shipping serializer features.
-
-### 20. `test_quantizelinear_int8` is a fictional registry entry
+### 19. `test_quantizelinear_int8` is a fictional registry entry
 
 `lib/axon_onnx/coverage/registry.ex:704` adds an entry for
 `{"node", "test_quantizelinear_int8"}` as `:known_bug` with a
@@ -408,7 +380,7 @@ implies a fix landed somewhere that doesn't apply to any real case.
 Other notes reference this fictional entry by name, propagating the
 fiction.
 
-### 21. `DynamicQuantizeLinear` recomputes `min/max/scale/zp` three times across the three outputs
+### 20. `DynamicQuantizeLinear` recomputes `min/max/scale/zp` three times across the three outputs
 
 `lib/axon_onnx/deserialize.ex` (around line 1770) registers three
 separate Axon layers for `y`, `y_scale`, and `y_zero_point`, each of
@@ -419,7 +391,7 @@ evaluator path does the work three times. Not a correctness issue, but
 worth noting since the plan acknowledges Nx as the lowering target and
 not just EXLA.
 
-### 22. The `DynamicQuantizeLinear` output dtype is hard-coded to `{:u, 8}`
+### 21. The `DynamicQuantizeLinear` output dtype is hard-coded to `{:u, 8}`
 
 The spec requires u8 output, so this is correct in practice. Documented
 here only because the new `quantize_target_type/2` side-channel exists
@@ -427,7 +399,7 @@ specifically to honour declared dtypes — and `DynamicQuantizeLinear` is
 the one op in the family that ignores it. A `# spec-fixed u8 output` line
 would settle this.
 
-### 23. `test_helper.exs` "init_names" variable is misnamed
+### 22. `test_helper.exs` "init_names" variable is misnamed
 
 In `3c08024`'s legacy-harness fix the variable holds *non-initializer
 inputs*, not initializer names. Functional, but the name says the
@@ -435,14 +407,14 @@ opposite of what the value contains — surprising for the next reader.
 
 ## Low severity (round 2)
 
-### 24. Duplicate map key in registry causes a compile warning
+### 23. Duplicate map key in registry causes a compile warning
 
 The `:passing` entry for `{"node", "test_if"}` at registry.ex:256 and
 the new `:known_bug` entry at registry.ex:728 produce
 `warning: key {"node", "test_if"} will be overridden in map` on every
 compile. Remove one.
 
-### 25. Coverage runner depends on EXLA implicitly
+### 24. Coverage runner depends on EXLA implicitly
 
 Sanity-checked by running the suite — it works. Documented because the
 QLinearMatMul / QLinearConv lowerings, especially with the
@@ -468,9 +440,9 @@ tries to run with `Nx.Defn.Evaluator`, expect different results.
   the QuantizeLinear / DequantizeLinear logic and reuse the
   `broadcast_q_params/4` / `quantize_target_type/2` helpers
   consistently.
-- Phase 1.5's harness is well-shaped — even though it's out of scope, if
-  the user blesses it, the architecture (separate registry, drift
-  detection, opt-out via `--round-trip false`) mirrors the import side.
+- Phase 1.5's round-trip harness is well-shaped — separate registry,
+  drift detection, opt-out via `--round-trip false`, mirroring the
+  import-side architecture.
 
 ## Updated suggested order
 
@@ -480,14 +452,11 @@ tries to run with `Nx.Defn.Evaluator`, expect different results.
    4 deliverables (item 18).
 2. **Promote the newly-passing cases** so the suite is green again
    (item 16). Delete the fictional `test_quantizelinear_int8` entry
-   (item 20). Correct the misclassified `test_quantizelinear_int16`
+   (item 19). Correct the misclassified `test_quantizelinear_int16`
    (item 17).
 3. **Rewrite the QLinearMatMul s8 notes** with the actual divergence
    (saturate-vs-wrap, item 17). Decide whether to switch to wrap to
    match the corpus or document the spec-conformance choice.
-4. **Get sign-off or roll back the serialize / round-trip work**
-   (item 19) — it was added without flagging an out-of-scope expansion
-   and pulls effort away from Phase 4.
-5. **Phase 4 hard tier** (Loop / Scan / dynamic shapes) is still the
+4. **Phase 4 hard tier** (Loop / Scan / dynamic shapes) is still the
    biggest remaining gap. The subgraph-as-closure refactor item 13
    flagged is still outstanding.

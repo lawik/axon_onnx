@@ -284,6 +284,7 @@ defmodule AxonOnnx.Deserialize do
     {"ReduceMean", &Nx.mean/2, :axes, :reduce_mean},
     {"ReduceMin", &Nx.reduce_min/2, :axes, :reduce_min},
     {"ReduceProd", &Nx.product/2, :axes, :reduce_prod},
+    {"ReduceSum", &Nx.sum/2, :axes, :reduce_sum},
     {"ReduceSumSquare", &sumsquare/2, :axes, :reduce_sum_square}
   ]
 
@@ -344,6 +345,66 @@ defmodule AxonOnnx.Deserialize do
 
       updated_axon = Map.put(axon, output_name, layer)
 
+      {updated_axon, params, used_params}
+    end
+  end
+
+  # 2-input form of axes-driven reductions (opset 13+ for ReduceSum,
+  # opset 18+ for the others). The single-input form above handles axes via
+  # attribute; this one resolves the axes tensor into a static list at
+  # import time when possible, then dispatches into the same layer fn.
+  #
+  # Resolution paths:
+  #   - axes is a Constant op or an initializer → extract values.
+  #   - axes is a graph input declared with shape {0} → empty axes; with
+  #     noop_with_empty_axes=0 (default) reduce all, with =1 return input
+  #     unchanged.
+  #   - axes is a runtime graph input with non-empty shape → bail; the
+  #     value is needed at trace time and we don't yet have a runtime-axes
+  #     reduction path. Surfaces as :unsupported in the registry.
+  for {op, reduce_fun, axis_or_axes, op_name} <- @reduction_op_types,
+      axis_or_axes == :axes do
+    defp recur_nodes(
+           %Node{
+             op_type: unquote(op),
+             attribute: attrs,
+             input: [data_name, axes_name],
+             output: [output_name]
+           },
+           {axon, params, used_params}
+         ) do
+      reduce_options = options!(attrs)
+      input = input!(data_name, axon, params, used_params)
+      keepdims = reduce_options["keepdims"] || 1
+      keep_axes = if keepdims == 1, do: true, else: false
+      noop_with_empty = (reduce_options["noop_with_empty_axes"] || 0) == 1
+
+      axes = resolve_reduce_axes!(axes_name, axon, params, used_params)
+
+      layer_fun = fn x, opts ->
+        opts = Keyword.delete(opts, :mode)
+        apply(unquote(reduce_fun), [x, opts])
+      end
+
+      layer =
+        cond do
+          axes == :empty and noop_with_empty ->
+            # Pass input through unchanged; still wrap in a layer so the
+            # registered output exists in the axon map.
+            Axon.nx(input, & &1, name: output_name, op_name: unquote(op_name))
+
+          axes == :empty ->
+            # Reduce all axes — Nx treats omitted axes that way.
+            build_reduce_layer(input, layer_fun, [keep_axes: keep_axes], output_name,
+              unquote(op_name)
+            )
+
+          is_list(axes) ->
+            build_reduce_layer(input, layer_fun, [keep_axes: keep_axes, axes: axes],
+              output_name, unquote(op_name))
+        end
+
+      updated_axon = Map.put(axon, output_name, layer)
       {updated_axon, params, used_params}
     end
   end
@@ -2682,6 +2743,58 @@ defmodule AxonOnnx.Deserialize do
       end
 
     {updated_axon, params, updated_params}
+  end
+
+  # Resolve the axes input of a 2-input reduction (opset 13+/18+ form).
+  # Returns a list of axis indices, `:empty` for a declared-shape-{0}
+  # graph input (axes absent), or raises if the values aren't statically
+  # available.
+  defp resolve_reduce_axes!(axes_name, axon, params, used_params) do
+    cond do
+      Map.has_key?(params, axes_name) ->
+        params[axes_name] |> Nx.to_flat_list()
+
+      Map.has_key?(used_params, axes_name) ->
+        used_params[axes_name] |> Nx.to_flat_list()
+
+      Map.has_key?(axon, axes_name) ->
+        case get_axon_node(axon[axes_name]) do
+          %Axon.Node{op: :constant, opts: [value: v]} ->
+            Nx.to_flat_list(v)
+
+          %Axon.Node{op: :input, opts: opts} ->
+            case Keyword.get(opts, :shape) do
+              {0} ->
+                :empty
+
+              _other ->
+                raise ArgumentError,
+                      "Reduction axes via runtime graph input is not yet " <>
+                        "supported (axes input #{inspect(axes_name)})."
+            end
+
+          _ ->
+            raise ArgumentError,
+                  "Reduction axes input #{inspect(axes_name)} must resolve to " <>
+                    "a constant or empty graph input."
+        end
+
+      true ->
+        raise ArgumentError, "axes input #{inspect(axes_name)} not found"
+    end
+  end
+
+  defp build_reduce_layer(input, layer_fun, opts, output_name, op_name) do
+    case get_axon_node(input) do
+      %Axon.Node{op: :constant, opts: [value: v]} ->
+        Axon.constant(layer_fun.(v, opts), name: output_name)
+
+      %Nx.Tensor{} = t ->
+        Axon.constant(layer_fun.(t, opts), name: output_name)
+
+      %Axon.Node{} ->
+        Axon.layer(layer_fun, [input], [name: output_name, op_name: op_name] ++ opts)
+    end
   end
 
   defp closed_subgraph?(%Onnx.GraphProto{input: inputs}), do: inputs == []

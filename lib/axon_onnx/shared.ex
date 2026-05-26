@@ -49,7 +49,9 @@ defmodule AxonOnnx.Shared do
   end
 
   defn l2_norm(x, opts \\ []) do
-    x |> Nx.pow(2) |> Nx.sum(opts)
+    # ReduceL2 per spec is sqrt(sum(x^2)); the previous impl returned just
+    # sum(x^2), which is ReduceSumSquare, not L2.
+    x |> Nx.pow(2) |> Nx.sum(opts) |> Nx.sqrt()
   end
 
   defn lrn(x, opts \\ []) do

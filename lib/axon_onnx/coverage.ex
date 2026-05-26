@@ -83,16 +83,22 @@ defmodule AxonOnnx.Coverage do
       # scrambled assignments for any model whose input names aren't already
       # alphabetical (e.g. Trilu's [x, k]).
       proto_input_names = proto_input_names(model_path)
+      axon_input_names = MapSet.new(Map.keys(Axon.get_inputs(model)))
 
       Enum.each(data_paths, fn data_path ->
         input_paths = data_path |> Path.join("input_*.pb") |> Path.wildcard() |> Enum.sort()
         output_paths = data_path |> Path.join("output_*.pb") |> Path.wildcard() |> Enum.sort()
 
+        # Only load inputs the Axon model actually consumes. Some corpus
+        # models declare extra graph inputs (e.g. ReduceSum's empty
+        # axes input with shape {0}) that the deserialiser folded into the
+        # static dispatch, so pb_to_tensor never needs to materialise them
+        # — and it would crash on Nx 0.12's "cannot build an empty tensor".
         inp_tensors =
           input_paths
-          |> Enum.map(&pb_to_tensor/1)
           |> Enum.zip(proto_input_names)
-          |> Map.new(fn {v, k} -> {k, v} end)
+          |> Enum.filter(fn {_path, name} -> MapSet.member?(axon_input_names, name) end)
+          |> Map.new(fn {path, name} -> {name, pb_to_tensor(path)} end)
 
         out_tensors = Enum.map(output_paths, &pb_to_tensor/1)
         actual_outputs = Axon.predict(model, params, inp_tensors)
