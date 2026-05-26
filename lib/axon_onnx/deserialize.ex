@@ -2533,6 +2533,64 @@ defmodule AxonOnnx.Deserialize do
   end
 
   defp recur_nodes(
+         %Node{op_type: "TopK", attribute: attrs, input: [x_name, k_name], output: outputs},
+         {axon, params, used_params}
+       ) do
+    # TopK(X, K) → (values, indices). K is a 1-element tensor. axis defaults
+    # to -1; largest defaults to 1; sorted defaults to 1.
+    options = options!(attrs)
+    axis = options["axis"] || -1
+    largest = (options["largest"] || 1) == 1
+    [values_name, indices_name] = outputs
+
+    x = input!(x_name, axon, params, used_params)
+
+    k =
+      cond do
+        constant_resolvable?(k_name, axon, params, used_params) ->
+          k_name |> constant!(axon, params, used_params) |> Nx.to_number()
+
+        out_shape = output_shape(values_name) ->
+          x_rank =
+            case x do
+              %Nx.Tensor{} = t -> Nx.rank(t)
+              %Axon{} = node -> node |> kernel_shape_from_axon!() |> tuple_size()
+            end
+
+          pos_axis = if axis < 0, do: x_rank + axis, else: axis
+          elem(out_shape, pos_axis)
+
+        true ->
+          raise ArgumentError,
+                "TopK needs either a constant K input or a statically-" <>
+                  "declared output shape; got neither for #{inspect(values_name)}."
+      end
+
+    direction = if largest, do: :desc, else: :asc
+
+    values_fun = fn x, _opts ->
+      sorted = Nx.argsort(x, axis: axis, direction: direction)
+      taken = Nx.take_along_axis(x, sorted, axis: axis)
+      Nx.slice_along_axis(taken, 0, k, axis: axis)
+    end
+
+    indices_fun = fn x, _opts ->
+      sorted = Nx.argsort(x, axis: axis, direction: direction)
+      Nx.slice_along_axis(sorted, 0, k, axis: axis)
+    end
+
+    values_layer = Axon.layer(values_fun, [x], name: values_name, op_name: :top_k_values)
+    indices_layer = Axon.layer(indices_fun, [x], name: indices_name, op_name: :top_k_indices)
+
+    axon =
+      axon
+      |> Map.put(values_name, values_layer)
+      |> Map.put(indices_name, indices_layer)
+
+    {axon, params, used_params}
+  end
+
+  defp recur_nodes(
          %Node{op_type: "Tile", input: [inp_name, repeats_name], output: [output_name]},
          {axon, params, used_params}
        ) do

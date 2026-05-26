@@ -7,22 +7,22 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 792 | 44.2% |
-| unsupported | 998 | 55.7% |
+| passing | 799 | 44.6% |
+| unsupported | 991 | 55.3% |
 | known_bug | 3 | 0.2% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 ## Round-trip coverage
 
-Of the 792 cases that import cleanly, how many also export back to
+Of the 799 cases that import cleanly, how many also export back to
 ONNX and re-import with matching predictions (the full bidirectional
 Nx/Axon ⇄ ONNX path).
 
 | Classification | Count | % of import-passing |
 |---|---|---|
-| passing | 443 | 55.9% |
-| unsupported | 349 | 44.1% |
+| passing | 443 | 55.4% |
+| unsupported | 356 | 44.6% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -32,8 +32,8 @@ Nx/Axon ⇄ ONNX path).
 
 **node** — 1653 cases
 
-- passing: 684
-- unsupported: 966
+- passing: 691
+- unsupported: 959
 - known_bug: 3
 
 **pytorch-converted** — 82 cases
@@ -248,7 +248,7 @@ A case using N distinct ops contributes to N rows.
 | TfIdfVectorizer | 7 | 0 | 7 | 0 | 0 | 0 |
 | ThresholdedRelu | 3 | 0 | 3 | 0 | 0 | 0 |
 | Tile | 4 | 4 | 0 | 0 | 0 | 0 |
-| TopK | 7 | 0 | 7 | 0 | 0 | 0 |
+| TopK | 7 | 7 | 0 | 0 | 0 | 0 |
 | Transpose | 117 | 10 | 107 | 0 | 0 | 0 |
 | TreeEnsemble | 2 | 0 | 2 | 0 | 0 | 0 |
 | Trilu | 18 | 10 | 8 | 0 | 0 | 0 |

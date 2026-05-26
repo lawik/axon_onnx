@@ -814,7 +814,14 @@ defmodule AxonOnnx.Coverage.Registry do
     {"node", "test_tile"} => {:passing, nil},
     {"node", "test_tile_precomputed"} => {:passing, nil},
     {"pytorch-operator", "test_operator_repeat"} => {:passing, nil},
-    {"pytorch-operator", "test_operator_repeat_dim_overflow"} => {:passing, nil}
+    {"pytorch-operator", "test_operator_repeat_dim_overflow"} => {:passing, nil},
+    {"node", "test_top_k"} => {:passing, nil},
+    {"node", "test_top_k_negative_axis"} => {:passing, nil},
+    {"node", "test_top_k_same_values"} => {:passing, nil},
+    {"node", "test_top_k_same_values_2d"} => {:passing, nil},
+    {"node", "test_top_k_same_values_largest"} => {:passing, nil},
+    {"node", "test_top_k_smallest"} => {:passing, nil},
+    {"node", "test_top_k_uint64"} => {:passing, nil}
   }
 
   @doc "Returns the raw `{category, name} => {status, note}` map."
