@@ -637,6 +637,226 @@ defmodule AxonOnnx.Deserialize do
 
   defp expand_to_spatial(value, _spatial_rank) when is_list(value), do: value
 
+  # ----- Attention --------------------------------------------------------
+
+  # Computes scaled dot-product attention.
+  # Always returns a tuple {Y, present_K, present_V, qk_matmul_output}
+  # — the calling wrapper picks the requested elements.
+  defp do_attention(tensors, opts) do
+    [q, k, v | rest] = tensors
+
+    {mask, past_k, past_v} =
+      case {opts[:has_mask], opts[:has_past_k], opts[:has_past_v], rest} do
+        {false, false, false, []} -> {nil, nil, nil}
+        {true, false, false, [m]} -> {m, nil, nil}
+        {false, true, false, [pk]} -> {nil, pk, nil}
+        {false, false, true, [pv]} -> {nil, nil, pv}
+        {true, true, false, [m, pk]} -> {m, pk, nil}
+        {true, false, true, [m, pv]} -> {m, nil, pv}
+        {false, true, true, [pk, pv]} -> {nil, pk, pv}
+        {true, true, true, [m, pk, pv]} -> {m, pk, pv}
+      end
+
+    # Normalise the 3-D form to 4-D by splitting `hidden_size` into
+    # (num_heads, head_size). 4-D inputs flow through unchanged.
+    q_rank = Nx.rank(q)
+
+    {q_4d, k_4d, v_4d} =
+      if q_rank == 3 do
+        q_nh = opts[:q_num_heads]
+        kv_nh = opts[:kv_num_heads]
+
+        if q_nh == 0 or kv_nh == 0 do
+          raise ArgumentError,
+                "Attention 3-D form requires q_num_heads and kv_num_heads attributes"
+        end
+
+        {bq, sq, hq} = Nx.shape(q)
+        head_size = div(hq, q_nh)
+        q4 = q |> Nx.reshape({bq, sq, q_nh, head_size}) |> Nx.transpose(axes: [0, 2, 1, 3])
+
+        {bk, sk, hk} = Nx.shape(k)
+        kv_head_size = div(hk, kv_nh)
+        k4 = k |> Nx.reshape({bk, sk, kv_nh, kv_head_size}) |> Nx.transpose(axes: [0, 2, 1, 3])
+
+        {bv, sv, hv} = Nx.shape(v)
+        v_head_size = div(hv, kv_nh)
+        v4 = v |> Nx.reshape({bv, sv, kv_nh, v_head_size}) |> Nx.transpose(axes: [0, 2, 1, 3])
+
+        {q4, k4, v4}
+      else
+        {q, k, v}
+      end
+
+    # Concat past_k / past_v along the kv_seq axis if provided.
+    k_full = if past_k, do: Nx.concatenate([past_k, k_4d], axis: 2), else: k_4d
+    v_full = if past_v, do: Nx.concatenate([past_v, v_4d], axis: 2), else: v_4d
+
+    {_, q_nh_4d, _q_seq, head_size} = Nx.shape(q_4d)
+    {_, kv_nh_4d, kv_seq, _} = Nx.shape(k_full)
+
+    # GQA: repeat KV heads to match Q heads.
+    {k_repeated, v_repeated} =
+      if q_nh_4d == kv_nh_4d do
+        {k_full, v_full}
+      else
+        repeats = div(q_nh_4d, kv_nh_4d)
+        {repeat_along_axis(k_full, 1, repeats), repeat_along_axis(v_full, 1, repeats)}
+      end
+
+    scale =
+      case opts[:scale] do
+        nil -> 1.0 / :math.sqrt(head_size)
+        s -> s
+      end
+
+    qk = Nx.dot(q_4d, [3], [0, 1], Nx.transpose(k_repeated, axes: [0, 1, 3, 2]), [2], [0, 1])
+    qk_scaled = Nx.multiply(qk, Nx.tensor(scale, type: Nx.type(qk)))
+
+    qk_softcapped =
+      case opts[:softcap] do
+        s when s == 0.0 or s == nil ->
+          qk_scaled
+
+        s ->
+          s_t = Nx.tensor(s, type: Nx.type(qk_scaled))
+          Nx.multiply(Nx.tanh(Nx.divide(qk_scaled, s_t)), s_t)
+      end
+
+    causal_mask =
+      if opts[:is_causal] do
+        # Lower-triangular True for kept (q can attend to k <= q + offset
+        # where offset = kv_seq - q_seq). Broadcast to the full score
+        # shape since Nx.select doesn't expand a lower-rank pred.
+        {b, nh, q_seq, kv_seq_v} = Nx.shape(qk_softcapped)
+        offset = kv_seq_v - q_seq
+        i = Nx.iota({q_seq, 1}, type: {:s, 64})
+        j = Nx.iota({1, kv_seq_v}, type: {:s, 64})
+
+        Nx.less_equal(j, Nx.add(i, offset))
+        |> Nx.reshape({1, 1, q_seq, kv_seq_v})
+        |> Nx.broadcast({b, nh, q_seq, kv_seq_v})
+      end
+
+    user_mask_t =
+      case mask do
+        nil ->
+          nil
+
+        _ ->
+          case Nx.type(mask) do
+            {:u, _} -> mask
+            {:s, _} -> mask
+            {:pred, _} -> mask
+            _ -> mask
+          end
+      end
+
+    scores =
+      cond do
+        causal_mask && user_mask_t ->
+          # Combine: user_mask is additive if float, multiplicative-bool
+          # otherwise. We treat ints/preds as boolean keep flags.
+          umask =
+            case Nx.type(user_mask_t) do
+              {kind, _} when kind in [:f, :bf] -> user_mask_t
+              _ -> nil
+            end
+
+          ukeep =
+            case Nx.type(user_mask_t) do
+              {kind, _} when kind in [:u, :s, :pred] -> user_mask_t
+              _ -> nil
+            end
+
+          combined_keep =
+            cond do
+              ukeep ->
+                Nx.logical_and(causal_mask, Nx.not_equal(ukeep, 0))
+              true ->
+                causal_mask
+            end
+
+          scores =
+            Nx.select(
+              combined_keep,
+              qk_softcapped,
+              Nx.tensor(:neg_infinity, type: Nx.type(qk_softcapped))
+            )
+
+          if umask, do: Nx.add(scores, umask), else: scores
+
+        causal_mask ->
+          Nx.select(
+            causal_mask,
+            qk_softcapped,
+            Nx.tensor(:neg_infinity, type: Nx.type(qk_softcapped))
+          )
+
+        user_mask_t ->
+          case Nx.type(user_mask_t) do
+            {kind, _} when kind in [:f, :bf] ->
+              Nx.add(qk_softcapped, user_mask_t)
+
+            _ ->
+              Nx.select(
+                Nx.not_equal(user_mask_t, 0),
+                qk_softcapped,
+                Nx.tensor(:neg_infinity, type: Nx.type(qk_softcapped))
+              )
+          end
+
+        true ->
+          qk_softcapped
+      end
+
+    probs = Axon.Activations.softmax(scores, axis: -1)
+    attn_out = Nx.dot(probs, [3], [0, 1], v_repeated, [2], [0, 1])
+
+    # Reshape back to 3-D if the inputs were 3-D.
+    y =
+      if q_rank == 3 do
+        {b, nh, sq, hs} = Nx.shape(attn_out)
+        attn_out |> Nx.transpose(axes: [0, 2, 1, 3]) |> Nx.reshape({b, sq, nh * hs})
+      else
+        attn_out
+      end
+
+    qk_out =
+      case opts[:qk_matmul_output_mode] do
+        0 -> qk
+        1 -> qk_scaled
+        2 -> qk_softcapped
+        3 -> scores
+      end
+
+    {y, k_full, v_full, qk_out}
+  end
+
+  defp repeat_along_axis(t, axis, repeats) do
+    # Nx.broadcast can't help directly; use Nx.tile equivalent via
+    # reshape + broadcast + reshape.
+    shape = Nx.shape(t)
+    dims = Tuple.to_list(shape)
+    new_axis_dims = List.insert_at(dims, axis + 1, 1) |> List.update_at(axis + 1, fn _ -> repeats end)
+    target_shape =
+      dims
+      |> List.update_at(axis, &(&1 * repeats))
+      |> List.to_tuple()
+
+    expanded_shape =
+      dims
+      |> List.insert_at(axis + 1, repeats)
+      |> List.to_tuple()
+
+    _ = new_axis_dims
+
+    t
+    |> Nx.new_axis(axis + 1)
+    |> Nx.broadcast(expanded_shape)
+    |> Nx.reshape(target_shape)
+  end
+
   # ----- RotaryEmbedding --------------------------------------------------
 
   # Applies rotary embedding to `input` along the head dimension. The
@@ -3283,6 +3503,107 @@ defmodule AxonOnnx.Deserialize do
       end
 
     {Map.put(axon, output_name, layer), params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "Attention",
+           attribute: attrs,
+           input: inputs,
+           output: outputs
+         },
+         {axon, params, used_params}
+       ) do
+    # ONNX-23 Attention. Inputs in order:
+    #   Q, K, V, [attn_mask], [past_key], [past_value]
+    # Outputs in order:
+    #   Y, [present_key], [present_value], [qk_matmul_output]
+    opts = options!(attrs)
+    is_causal = (opts["is_causal"] || 0) == 1
+    softcap = opts["softcap"] || 0.0
+    scale_attr = opts["scale"]
+    softmax_precision = opts["softmax_precision"] || 1
+    qk_mode = opts["qk_matmul_output_mode"] || 0
+    q_num_heads = opts["q_num_heads"] || 0
+    kv_num_heads = opts["kv_num_heads"] || 0
+
+    _ = softmax_precision
+
+    {q_name, k_name, v_name, mask_name, past_k_name, past_v_name} =
+      case inputs do
+        [q, k, v] -> {q, k, v, nil, nil, nil}
+        [q, k, v, m] -> {q, k, v, (m != "" && m) || nil, nil, nil}
+        [q, k, v, m, pk] -> {q, k, v, (m != "" && m) || nil, (pk != "" && pk) || nil, nil}
+        [q, k, v, m, pk, pv] -> {q, k, v, (m != "" && m) || nil, (pk != "" && pk) || nil, (pv != "" && pv) || nil}
+      end
+
+    q = input!(q_name, axon, params, used_params)
+    k = input!(k_name, axon, params, used_params)
+    v = input!(v_name, axon, params, used_params)
+    mask = if mask_name, do: input!(mask_name, axon, params, used_params)
+    past_k = if past_k_name, do: input!(past_k_name, axon, params, used_params)
+    past_v = if past_v_name, do: input!(past_v_name, axon, params, used_params)
+
+    layer_inputs =
+      [q, k, v]
+      |> then(fn xs -> if mask, do: xs ++ [mask], else: xs end)
+      |> then(fn xs -> if past_k, do: xs ++ [past_k], else: xs end)
+      |> then(fn xs -> if past_v, do: xs ++ [past_v], else: xs end)
+
+    fun = fn tensors ->
+      do_attention(tensors,
+        is_causal: is_causal,
+        softcap: softcap,
+        scale: scale_attr,
+        q_num_heads: q_num_heads,
+        kv_num_heads: kv_num_heads,
+        qk_matmul_output_mode: qk_mode,
+        has_mask: not is_nil(mask),
+        has_past_k: not is_nil(past_k),
+        has_past_v: not is_nil(past_v)
+      )
+    end
+
+    # Axon.layer's wrapper arity is fixed at construction, so we pick a
+    # specific arity based on how many inputs we have.
+    wrapper =
+      case length(layer_inputs) do
+        3 -> fn a, b, c, _opts -> fun.([a, b, c]) end
+        4 -> fn a, b, c, d, _opts -> fun.([a, b, c, d]) end
+        5 -> fn a, b, c, d, e, _opts -> fun.([a, b, c, d, e]) end
+        6 -> fn a, b, c, d, e, f, _opts -> fun.([a, b, c, d, e, f]) end
+      end
+
+    [y_name | extra_outputs] = outputs
+
+    main_layer =
+      Axon.layer(wrapper, layer_inputs, name: y_name <> "__attn_full", op_name: :attention)
+
+    # Attention produces up to 4 outputs: y, present_key, present_value,
+    # qk_matmul_output. We expose y and any requested extras by
+    # decomposing via element-of-tuple layers.
+    layers =
+      Enum.with_index(outputs)
+      |> Enum.map(fn {name, idx} ->
+        layer =
+          Axon.nx(
+            main_layer,
+            fn tuple ->
+              if is_tuple(tuple), do: elem(tuple, idx), else: tuple
+            end,
+            name: name,
+            op_name: :attention_output
+          )
+
+        {name, layer}
+      end)
+
+    _ = extra_outputs
+
+    updated_axon =
+      Enum.reduce(layers, axon, fn {name, layer}, acc -> Map.put(acc, name, layer) end)
+
+    {updated_axon, params, used_params}
   end
 
   defp recur_nodes(
