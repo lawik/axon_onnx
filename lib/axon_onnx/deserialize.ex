@@ -4531,17 +4531,48 @@ defmodule AxonOnnx.Deserialize do
       )
     end
 
+    # Per the ONNX Reshape spec, `0` in the shape means "use the
+    # corresponding input dim at this position" (unless allowzero=1),
+    # and `-1` means "infer this dim". We resolve `0` against the input
+    # shape; my previous reduce silently dropped 0s, which collapsed
+    # downstream tensors to a rank-1 shape.
+    input_shape =
+      try do
+        kernel_shape_from_axon!(inp)
+      catch
+        _, _ -> nil
+      rescue
+        _ -> nil
+      end
+
     new_shape =
       cond do
         constant_resolvable?(shape, axon, params, used_params) ->
           shape
           |> constant!(axon, params, used_params)
           |> Nx.to_flat_list()
+          |> Enum.with_index()
           |> Enum.reduce({[], false}, fn
-            0, {cur_shape, already_auto?} -> {cur_shape, already_auto?}
-            -1, {cur_shape, false} -> {[:auto | cur_shape], true}
-            -1, {cur_shape, true} -> {[1 | cur_shape], true}
-            x, {cur_shape, already_auto?} -> {[x | cur_shape], already_auto?}
+            {0, _idx}, {cur_shape, auto?} when allowzero == 1 ->
+              {[0 | cur_shape], auto?}
+
+            {0, idx}, {cur_shape, auto?} ->
+              dim =
+                case input_shape do
+                  shape_t when is_tuple(shape_t) -> elem(shape_t, idx)
+                  _ -> raise ArgumentError, "Reshape '0' dim requires a known input shape"
+                end
+
+              {[dim | cur_shape], auto?}
+
+            {-1, _idx}, {cur_shape, false} ->
+              {[:auto | cur_shape], true}
+
+            {-1, _idx}, {cur_shape, true} ->
+              {[1 | cur_shape], true}
+
+            {x, _idx}, {cur_shape, auto?} ->
+              {[x | cur_shape], auto?}
           end)
           |> elem(0)
           |> Enum.reverse()

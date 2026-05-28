@@ -7,22 +7,22 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 1159 | 64.6% |
-| unsupported | 631 | 35.2% |
+| passing | 1205 | 67.2% |
+| unsupported | 585 | 32.6% |
 | known_bug | 3 | 0.2% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 ## Round-trip coverage
 
-Of the 1159 cases that import cleanly, how many also export back to
+Of the 1205 cases that import cleanly, how many also export back to
 ONNX and re-import with matching predictions (the full bidirectional
 Nx/Axon ⇄ ONNX path).
 
 | Classification | Count | % of import-passing |
 |---|---|---|
-| passing | 544 | 46.9% |
-| unsupported | 615 | 53.1% |
+| passing | 544 | 45.1% |
+| unsupported | 661 | 54.9% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -32,8 +32,8 @@ Nx/Axon ⇄ ONNX path).
 
 **node** — 1653 cases
 
-- passing: 1049
-- unsupported: 601
+- passing: 1095
+- unsupported: 555
 - known_bug: 3
 
 **pytorch-converted** — 82 cases
@@ -73,7 +73,7 @@ A case using N distinct ops contributes to N rows.
 | Asinh | 2 | 2 | 0 | 0 | 0 | 0 |
 | Atan | 2 | 2 | 0 | 0 | 0 | 0 |
 | Atanh | 2 | 2 | 0 | 0 | 0 | 0 |
-| Attention | 62 | 0 | 62 | 0 | 0 | 0 |
+| Attention | 62 | 38 | 24 | 0 | 0 | 0 |
 | AveragePool | 27 | 25 | 2 | 0 | 0 | 0 |
 | BatchNormalization | 9 | 5 | 4 | 0 | 0 | 0 |
 | Bernoulli | 3 | 0 | 3 | 0 | 0 | 0 |
@@ -204,7 +204,7 @@ A case using N distinct ops contributes to N rows.
 | Resize | 39 | 21 | 18 | 0 | 0 | 0 |
 | ReverseSequence | 2 | 2 | 0 | 0 | 0 | 0 |
 | RoiAlign | 3 | 0 | 3 | 0 | 0 | 0 |
-| RotaryEmbedding | 8 | 0 | 8 | 0 | 0 | 0 |
+| RotaryEmbedding | 8 | 8 | 0 | 0 | 0 | 0 |
 | Round | 4 | 4 | 0 | 0 | 0 | 0 |
 | STFT | 2 | 0 | 2 | 0 | 0 | 0 |
 | Scan | 2 | 0 | 2 | 0 | 0 | 0 |
