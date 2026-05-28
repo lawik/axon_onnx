@@ -7,24 +7,24 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 1264 | 70.5% |
-| unsupported | 526 | 29.3% |
+| passing | 1272 | 70.9% |
+| unsupported | 518 | 28.9% |
 | known_bug | 3 | 0.2% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 ## Round-trip coverage
 
-Of the 1264 cases that import cleanly, how many also export back to
+Of the 1272 cases that import cleanly, how many also export back to
 ONNX and re-import with matching predictions (the full bidirectional
 Nx/Axon ⇄ ONNX path).
 
 | Classification | Count | % of import-passing |
 |---|---|---|
-| passing | 544 | 43.0% |
-| unsupported | 720 | 57.0% |
+| passing | 544 | 42.8% |
+| unsupported | 727 | 57.2% |
 | known_bug | 0 | 0.0% |
-| newly_passing | 0 | 0.0% |
+| newly_passing | 1 | 0.1% |
 | regression | 0 | 0.0% |
 
 
@@ -32,8 +32,8 @@ Nx/Axon ⇄ ONNX path).
 
 **node** — 1653 cases
 
-- passing: 1154
-- unsupported: 496
+- passing: 1162
+- unsupported: 488
 - known_bug: 3
 
 **pytorch-converted** — 82 cases
@@ -74,7 +74,7 @@ A case using N distinct ops contributes to N rows.
 | Atan | 2 | 2 | 0 | 0 | 0 | 0 |
 | Atanh | 2 | 2 | 0 | 0 | 0 | 0 |
 | Attention | 62 | 38 | 24 | 0 | 0 | 0 |
-| AveragePool | 27 | 25 | 2 | 0 | 0 | 0 |
+| AveragePool | 27 | 26 | 1 | 0 | 0 | 0 |
 | BatchNormalization | 9 | 5 | 4 | 0 | 0 | 0 |
 | Bernoulli | 3 | 0 | 3 | 0 | 0 | 0 |
 | Binarizer | 1 | 0 | 1 | 0 | 0 | 0 |
@@ -96,7 +96,7 @@ A case using N distinct ops contributes to N rows.
 | ConcatFromSequence | 2 | 0 | 2 | 0 | 0 | 0 |
 | Constant | 274 | 234 | 40 | 0 | 0 | 0 |
 | ConstantOfShape | 72 | 55 | 17 | 0 | 0 | 0 |
-| Conv | 33 | 32 | 1 | 0 | 0 | 0 |
+| Conv | 33 | 33 | 0 | 0 | 0 | 0 |
 | ConvInteger | 2 | 1 | 0 | 1 | 0 | 0 |
 | ConvTranspose | 14 | 4 | 9 | 1 | 0 | 0 |
 | Cos | 8 | 2 | 6 | 0 | 0 | 0 |
@@ -108,7 +108,7 @@ A case using N distinct ops contributes to N rows.
 | DequantizeLinear | 14 | 4 | 10 | 0 | 0 | 0 |
 | Det | 2 | 0 | 2 | 0 | 0 | 0 |
 | Div | 184 | 152 | 32 | 0 | 0 | 0 |
-| Dropout | 12 | 3 | 9 | 0 | 0 | 0 |
+| Dropout | 12 | 7 | 5 | 0 | 0 | 0 |
 | DynamicQuantizeLinear | 3 | 3 | 0 | 0 | 0 | 0 |
 | Einsum | 6 | 6 | 0 | 0 | 0 | 0 |
 | Elu | 5 | 5 | 0 | 0 | 0 | 0 |
@@ -154,11 +154,11 @@ A case using N distinct ops contributes to N rows.
 | LogSoftmax | 44 | 44 | 0 | 0 | 0 | 0 |
 | Loop | 11 | 0 | 11 | 0 | 0 | 0 |
 | LpNormalization | 6 | 6 | 0 | 0 | 0 | 0 |
-| LpPool | 8 | 6 | 2 | 0 | 0 | 0 |
+| LpPool | 8 | 7 | 1 | 0 | 0 | 0 |
 | MatMul | 74 | 66 | 8 | 0 | 0 | 0 |
 | MatMulInteger | 1 | 1 | 0 | 0 | 0 | 0 |
 | Max | 28 | 22 | 6 | 0 | 0 | 0 |
-| MaxPool | 28 | 25 | 3 | 0 | 0 | 0 |
+| MaxPool | 28 | 26 | 2 | 0 | 0 | 0 |
 | MaxUnpool | 2 | 1 | 1 | 0 | 0 | 0 |
 | Mean | 3 | 3 | 0 | 0 | 0 | 0 |
 | MeanVarianceNormalization | 1 | 0 | 1 | 0 | 0 | 0 |
