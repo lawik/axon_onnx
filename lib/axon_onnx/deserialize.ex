@@ -637,6 +637,194 @@ defmodule AxonOnnx.Deserialize do
 
   defp expand_to_spatial(value, _spatial_rank) when is_list(value), do: value
 
+  # ----- Einsum -----------------------------------------------------------
+
+  # Single-input einsum: handles reductions, transposes, and diagonals.
+  # `spec_in` is the per-axis subscript string (possibly with "..."),
+  # `spec_out` is the output subscript string (may be nil for implicit
+  # output).
+  defp do_einsum_1(x, spec_in, spec_out) do
+    rank = Nx.rank(x)
+
+    # Expand "..." in the input spec to enough single-letter placeholders
+    # for the actual rank.
+    {in_letters, batch_letters} = einsum_expand_spec(spec_in, rank)
+
+    out_spec =
+      case spec_out do
+        nil -> einsum_default_output(in_letters, batch_letters)
+        _ -> spec_out
+      end
+
+    {out_letters, _} = einsum_expand_spec(out_spec, length(batch_letters) + count_non_dots(out_spec))
+
+    # Diagonals: any letter repeated in the input is a diagonal axis. We
+    # gather along it before further reductions.
+    dup_letters = in_letters |> Enum.frequencies() |> Enum.filter(fn {_, c} -> c > 1 end) |> Enum.map(&elem(&1, 0))
+
+    {x_after_diag, in_after_diag} =
+      Enum.reduce(dup_letters, {x, in_letters}, fn letter, {acc_x, acc_letters} ->
+        axes = acc_letters |> Enum.with_index() |> Enum.filter(fn {l, _} -> l == letter end) |> Enum.map(&elem(&1, 1))
+
+        [first | rest] = axes
+        # Diagonal: take elements where all axes match. We use
+        # Nx.take_along_axis with an iota matched to the first axis.
+        dim = Nx.axis_size(acc_x, first)
+        rest_axes = Enum.sort(rest, :desc)
+
+        {reduced, new_letters} =
+          Enum.reduce(rest_axes, {acc_x, acc_letters}, fn ax, {ax_x, ax_letters} ->
+            # Index along this axis with the same iota as the first axis.
+            # Compute a diagonal slice: for index i in axis `first`, we want
+            # the element at position i in axis `ax` too.
+            iota =
+              Nx.iota({dim}, type: {:s, 64})
+
+            shape_template = Tuple.duplicate(1, Nx.rank(ax_x)) |> put_elem(first, dim)
+            iota_b = Nx.reshape(iota, shape_template) |> Nx.broadcast(Nx.shape(ax_x))
+            gathered = Nx.take_along_axis(ax_x, iota_b, axis: ax)
+            slice = Nx.slice_along_axis(gathered, 0, 1, axis: ax) |> Nx.squeeze(axes: [ax])
+            {slice, List.delete_at(ax_letters, ax)}
+          end)
+
+        {reduced, new_letters}
+      end)
+
+    # Sum over axes whose letters don't appear in the output spec.
+    sum_axes =
+      in_after_diag
+      |> Enum.with_index()
+      |> Enum.filter(fn {l, _} -> not Enum.member?(out_letters, l) end)
+      |> Enum.map(&elem(&1, 1))
+      |> Enum.sort(:desc)
+
+    {x_summed, in_after_sum} =
+      Enum.reduce(sum_axes, {x_after_diag, in_after_diag}, fn ax, {ax_x, ax_letters} ->
+        {Nx.sum(ax_x, axes: [ax]), List.delete_at(ax_letters, ax)}
+      end)
+
+    # Transpose to match the output letter order.
+    perm = Enum.map(out_letters, fn letter -> Enum.find_index(in_after_sum, &(&1 == letter)) end)
+
+    if perm == Enum.to_list(0..(length(in_after_sum) - 1)//1) do
+      x_summed
+    else
+      Nx.transpose(x_summed, axes: perm)
+    end
+  end
+
+  defp do_einsum_2(a, b, spec_a, spec_b, spec_out) do
+    rank_a = Nx.rank(a)
+    rank_b = Nx.rank(b)
+    {a_letters, _} = einsum_expand_spec(spec_a, rank_a)
+    {b_letters, _} = einsum_expand_spec(spec_b, rank_b)
+
+    out_spec =
+      case spec_out do
+        nil ->
+          # Implicit output: letters appearing exactly once, in
+          # alphabetical order.
+          (a_letters ++ b_letters)
+          |> Enum.frequencies()
+          |> Enum.filter(fn {_, c} -> c == 1 end)
+          |> Enum.map(&elem(&1, 0))
+          |> Enum.sort()
+          |> Enum.join("")
+
+        _ -> spec_out
+      end
+
+    {out_letters, _} = einsum_expand_spec(out_spec, count_non_dots(out_spec))
+
+    # Letters classified across the two inputs:
+    # * batch: in A, B, and output
+    # * contract: in A and B but not in output
+    # * a_keep: in A and output (not in B)
+    # * b_keep: in B and output (not in A)
+    a_set = MapSet.new(a_letters)
+    b_set = MapSet.new(b_letters)
+    out_set = MapSet.new(out_letters)
+
+    batch_letters =
+      a_letters |> Enum.filter(&(MapSet.member?(b_set, &1) and MapSet.member?(out_set, &1)))
+
+    contract_letters =
+      a_letters |> Enum.filter(&(MapSet.member?(b_set, &1) and not MapSet.member?(out_set, &1)))
+
+    batch_axes_a = Enum.map(batch_letters, fn l -> Enum.find_index(a_letters, &(&1 == l)) end)
+    batch_axes_b = Enum.map(batch_letters, fn l -> Enum.find_index(b_letters, &(&1 == l)) end)
+    contract_axes_a = Enum.map(contract_letters, fn l -> Enum.find_index(a_letters, &(&1 == l)) end)
+    contract_axes_b = Enum.map(contract_letters, fn l -> Enum.find_index(b_letters, &(&1 == l)) end)
+
+    _ = a_set
+
+    # Use Nx.dot with batch axes + contracting axes. The result's axis
+    # order is: batch axes (in their order), then a's remaining axes,
+    # then b's remaining axes.
+    dotted = Nx.dot(a, contract_axes_a, batch_axes_a, b, contract_axes_b, batch_axes_b)
+
+    # Compute the letter order produced by Nx.dot.
+    a_keep_letters =
+      a_letters
+      |> Enum.with_index()
+      |> Enum.filter(fn {l, _} -> not Enum.member?(batch_letters, l) and not Enum.member?(contract_letters, l) end)
+      |> Enum.map(&elem(&1, 0))
+
+    b_keep_letters =
+      b_letters
+      |> Enum.with_index()
+      |> Enum.filter(fn {l, _} -> not Enum.member?(batch_letters, l) and not Enum.member?(contract_letters, l) end)
+      |> Enum.map(&elem(&1, 0))
+
+    dotted_letters = batch_letters ++ a_keep_letters ++ b_keep_letters
+
+    # Transpose to match output letter order.
+    perm = Enum.map(out_letters, fn letter -> Enum.find_index(dotted_letters, &(&1 == letter)) end)
+
+    if perm == Enum.to_list(0..(length(dotted_letters) - 1)//1) do
+      dotted
+    else
+      Nx.transpose(dotted, axes: perm)
+    end
+  end
+
+  # Expands "..." in a subscript to enough placeholder characters
+  # ("\\u0001" + i) to fill the rank. Returns the per-axis letter list and
+  # the list of synthetic placeholders representing the "..." span.
+  defp einsum_expand_spec(spec, rank) do
+    case String.split(spec, "...") do
+      [single] ->
+        {String.graphemes(single), []}
+
+      [prefix, suffix] ->
+        named = String.length(prefix) + String.length(suffix)
+        dot_count = max(rank - named, 0)
+        placeholders = for i <- 0..(dot_count - 1), do: "<#{i}>"
+        {String.graphemes(prefix) ++ placeholders ++ String.graphemes(suffix), placeholders}
+    end
+  end
+
+  defp count_non_dots(spec) when is_binary(spec) do
+    spec |> String.replace("...", "") |> String.length()
+  end
+
+  defp count_non_dots(nil), do: 0
+
+  defp einsum_default_output(in_letters, batch_placeholders) do
+    # Implicit output (no ->): letters appearing exactly once, in
+    # alphabetical order, with "..." prepended if there are batch
+    # placeholders.
+    rest =
+      in_letters
+      |> Enum.frequencies()
+      |> Enum.filter(fn {l, c} -> c == 1 and l not in batch_placeholders end)
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.sort()
+      |> Enum.join("")
+
+    if batch_placeholders == [], do: rest, else: "..." <> rest
+  end
+
   # Resize helpers — coordinate transformation (output i → input float)
   # and nearest-mode rounding. The corpus exercises five
   # coordinate_transformation_modes; "tf_crop_and_resize" is rejected
@@ -2908,6 +3096,63 @@ defmodule AxonOnnx.Deserialize do
         target_shape: target_shape,
         axes: axes_attr
       )
+
+    {Map.put(axon, output_name, layer), params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{op_type: "Einsum", attribute: attrs, input: inputs, output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    # Einsum: equation is "lhs -> rhs" where lhs is comma-separated
+    # input subscripts. We support single-input reductions/transposes
+    # and two-input contractions. Ellipsis "..." for trailing batch
+    # dims is recognised.
+    equation = options!(attrs)["equation"]
+
+    [lhs, rhs] =
+      case String.split(equation, "->", parts: 2) do
+        [l, r] -> [String.replace(l, " ", ""), String.replace(r, " ", "")]
+        [l] -> [String.replace(l, " ", ""), nil]
+      end
+
+    lhs_specs = String.split(lhs, ",")
+    input_tensors = Enum.map(inputs, &input!(&1, axon, params, used_params))
+
+    fun =
+      case {length(input_tensors), lhs_specs} do
+        {1, [in_spec]} ->
+          fn x, _opts ->
+            do_einsum_1(x, in_spec, rhs)
+          end
+
+        {2, [a_spec, b_spec]} ->
+          fn a, b, _opts ->
+            do_einsum_2(a, b, a_spec, b_spec, rhs)
+          end
+
+        _ ->
+          raise ArgumentError,
+                "Einsum with #{length(input_tensors)} inputs is not yet supported"
+      end
+
+    layer =
+      case input_tensors do
+        [single] ->
+          case get_axon_node(single) do
+            %Axon.Node{op: :constant, opts: [value: v]} ->
+              Axon.constant(fun.(v, []), name: output_name)
+
+            %Nx.Tensor{} = t ->
+              Axon.constant(fun.(t, []), name: output_name)
+
+            %Axon.Node{} ->
+              Axon.layer(fun, [single], name: output_name, op_name: :einsum)
+          end
+
+        [_a, _b] = both ->
+          Axon.layer(fun, both, name: output_name, op_name: :einsum)
+      end
 
     {Map.put(axon, output_name, layer), params, used_params}
   end
