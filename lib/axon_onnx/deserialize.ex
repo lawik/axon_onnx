@@ -3101,6 +3101,77 @@ defmodule AxonOnnx.Deserialize do
   end
 
   defp recur_nodes(
+         %Node{
+           op_type: "OneHot",
+           attribute: attrs,
+           input: [indices_name, depth_name, values_name],
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # OneHot: for each position in indices, produce a vector of length
+    # `depth` along the `axis` dim where on_value (values[1]) sits at
+    # index `indices[i]` and off_value (values[0]) elsewhere. Negative
+    # indices count from the end; out-of-range indices stay all
+    # off_value.
+    axis = options!(attrs)["axis"] || -1
+    indices = input!(indices_name, axon, params, used_params)
+    depth = constant!(depth_name, axon, params, used_params) |> Nx.to_number() |> trunc()
+    values = constant!(values_name, axon, params, used_params)
+
+    fun = fn ind, _opts ->
+      out_type = Nx.type(values)
+      ind_i = Nx.as_type(ind, {:s, 64})
+      d = Nx.tensor(depth, type: {:s, 64})
+      # Wrap negative indices.
+      ind_normalised = Nx.select(Nx.less(ind_i, 0), Nx.add(ind_i, d), ind_i)
+
+      iota = Nx.iota({depth}, type: {:s, 64})
+      ind_shape = Nx.shape(ind_normalised)
+      ind_rank = tuple_size(ind_shape)
+      pos_axis = if axis < 0, do: ind_rank + axis + 1, else: axis
+
+      # Reshape iota to broadcast along `pos_axis`.
+      iota_shape =
+        List.to_tuple(
+          for i <- 0..ind_rank do
+            if i == pos_axis, do: depth, else: 1
+          end
+        )
+
+      iota_b = Nx.reshape(iota, iota_shape)
+
+      # Reshape indices with a 1 inserted at pos_axis.
+      ind_expanded_shape =
+        ind_shape
+        |> Tuple.to_list()
+        |> List.insert_at(pos_axis, 1)
+        |> List.to_tuple()
+
+      ind_b = Nx.reshape(ind_normalised, ind_expanded_shape)
+
+      mask = Nx.equal(ind_b, iota_b)
+      off_value = values[[0]] |> Nx.as_type(out_type)
+      on_value = values[[1]] |> Nx.as_type(out_type)
+      Nx.select(mask, on_value, off_value)
+    end
+
+    layer =
+      case get_axon_node(indices) do
+        %Axon.Node{op: :constant, opts: [value: v]} ->
+          Axon.constant(fun.(v, []), name: output_name)
+
+        %Axon.Node{} ->
+          Axon.layer(fun, [indices], name: output_name, op_name: :one_hot)
+
+        %Nx.Tensor{} = t ->
+          Axon.constant(fun.(t, []), name: output_name)
+      end
+
+    {Map.put(axon, output_name, layer), params, used_params}
+  end
+
+  defp recur_nodes(
          %Node{op_type: "Einsum", attribute: attrs, input: inputs, output: [output_name]},
          {axon, params, used_params}
        ) do
