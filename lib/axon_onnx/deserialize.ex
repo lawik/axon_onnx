@@ -637,6 +637,68 @@ defmodule AxonOnnx.Deserialize do
 
   defp expand_to_spatial(value, _spatial_rank) when is_list(value), do: value
 
+  # ONNX ceil_mode=1 rounds the spatial output dim up. Lower it to a
+  # two-step adjustment so the floor-mode pool used downstream matches
+  # spec output:
+  #
+  #   1. extra right-padding so the ceil-rounded count of windows fits
+  #   2. a trailing slice to drop any window whose start falls entirely
+  #      in the pad region ("last window starts on pad")
+  #
+  # Returns `{padding_config, trim_per_axis}` where trim_per_axis is the
+  # number of trailing windows to slice off each spatial axis.
+  defp maybe_ceil_mode_adjustment(0, base_padding, spatial_rank, _, _, _, _),
+    do: {base_padding, List.duplicate(0, spatial_rank)}
+
+  defp maybe_ceil_mode_adjustment(1, base_padding, spatial_rank, kernel_size, strides, dilations, inp) do
+    explicit =
+      case base_padding do
+        list when is_list(list) -> list
+        :valid -> List.duplicate({0, 0}, spatial_rank)
+        # :same is shape-preserving already; ceil_mode is moot.
+        other -> other
+      end
+
+    case explicit do
+      list when is_list(list) ->
+        input_spatial =
+          case kernel_shape_from_axon!(inp) do
+            shape when is_tuple(shape) ->
+              shape |> Tuple.to_list() |> Enum.take(-spatial_rank)
+          end
+
+        stride_list = expand_to_spatial(strides, spatial_rank)
+        dilation_list = expand_to_spatial(dilations, spatial_rank)
+
+        list
+        |> Enum.zip(input_spatial)
+        |> Enum.zip(Enum.zip(Tuple.to_list(kernel_size), Enum.zip(stride_list, dilation_list)))
+        |> Enum.map(fn {{{lo, hi}, in_dim}, {k, {s, d}}} ->
+          eff_k = (k - 1) * d + 1
+          numerator = in_dim + lo + hi - eff_k
+
+          ceil_out =
+            if numerator >= 0,
+              do: div(numerator + s - 1, s) + 1,
+              else: 1
+
+          last_start = (ceil_out - 1) * s
+          drop = if last_start >= in_dim + lo, do: 1, else: 0
+          kept_out = max(ceil_out - drop, 1)
+          required_padded = (ceil_out - 1) * s + eff_k
+          extra = max(required_padded - (in_dim + lo + hi), 0)
+          {{lo, hi + extra}, ceil_out - kept_out}
+        end)
+        |> Enum.unzip()
+        |> case do
+          {padding, trims} -> {padding, trims}
+        end
+
+      atom ->
+        {atom, List.duplicate(0, spatial_rank)}
+    end
+  end
+
   # ONNX Div uses C-style truncation for integers (`Nx.quotient`) and
   # standard floating-point division for floats — `Nx.divide` would
   # promote to float for integer inputs, which differs from the spec.
@@ -1254,7 +1316,7 @@ defmodule AxonOnnx.Deserialize do
   end
 
   defp recur_nodes(
-         %Node{op_type: "MaxPool", input: [inp], attribute: attrs, output: [output_name]},
+         %Node{op_type: "MaxPool", input: [inp], attribute: attrs, output: [output_name | _]},
          {axon, params, used_params}
        ) do
     max_pool_options = options!(attrs)
@@ -1267,17 +1329,8 @@ defmodule AxonOnnx.Deserialize do
     strides = max_pool_options["strides"]
     dilations = max_pool_options["dilations"] || 1
 
-    # Kernel size is a list of integers
     kernel_size = List.to_tuple(kernel_shape)
 
-    # Axon only supports default ceil_mode right now
-    if ceil_mode != 0 do
-      raise ArgumentError,
-            "invalid ceil_mode #{inspect(ceil_mode)}, Axon only supports" <>
-              " ceil_mode of 0"
-    end
-
-    # Storage Order is not an Axon concern
     if storage_order do
       Logger.warning(
         "Storage order is not supported by Axon and is instead a backend-specific" <>
@@ -1286,8 +1339,6 @@ defmodule AxonOnnx.Deserialize do
       )
     end
 
-    # Axon default strides are equal to the kernel shape (Keras behavior)
-    # where as strides default to 1 in ONNX
     strides =
       if strides do
         strides
@@ -1297,23 +1348,65 @@ defmodule AxonOnnx.Deserialize do
 
     inp = axon!(inp, axon)
 
-    # Compute padding from auto_pad and pads attributes
-    padding_config = padding!(auto_pad, pads, kernel_size, strides)
+    base_padding = padding!(auto_pad, pads, kernel_size, strides)
+    spatial_rank = tuple_size(kernel_size)
 
-    updated_axon =
-      Map.put(
-        axon,
-        output_name,
-        Axon.max_pool(inp,
-          kernel_size: kernel_size,
-          strides: strides,
-          padding: padding_config,
-          dilations: dilations,
-          name: output_name,
-          channels: :first
-        )
+    # ceil_mode=1: same as AveragePool — add right-pad to make the
+    # ceil-rounded window count fit, then trim trailing windows whose
+    # start positions are entirely in the pad region. For MaxPool the
+    # "pad" cells need to be the dtype's neg_infinity so they never win
+    # max comparisons; we use a custom layer when trimming, otherwise
+    # fall back on Axon.max_pool (which is what the serializer can
+    # round-trip).
+    {padding_config, trim_per_axis} =
+      maybe_ceil_mode_adjustment(
+        ceil_mode,
+        base_padding,
+        spatial_rank,
+        kernel_size,
+        strides,
+        dilations,
+        inp
       )
 
+    needs_trim = Enum.any?(trim_per_axis, &(&1 > 0))
+    pool_name = if needs_trim, do: output_name <> "__pool", else: output_name
+
+    pool_layer =
+      Axon.max_pool(inp,
+        kernel_size: kernel_size,
+        strides: strides,
+        padding: padding_config,
+        dilations: dilations,
+        name: pool_name,
+        channels: :first
+      )
+
+    layer =
+      if needs_trim do
+        Axon.nx(
+          pool_layer,
+          fn x ->
+            trim_per_axis
+            |> Enum.with_index()
+            |> Enum.reduce(x, fn {trim, idx}, acc ->
+              if trim > 0 do
+                axis = Nx.rank(acc) - spatial_rank + idx
+                len = Nx.axis_size(acc, axis) - trim
+                Nx.slice_along_axis(acc, 0, len, axis: axis)
+              else
+                acc
+              end
+            end)
+          end,
+          name: output_name,
+          op_name: :max_pool_trim
+        )
+      else
+        pool_layer
+      end
+
+    updated_axon = Map.put(axon, output_name, layer)
     {updated_axon, params, used_params}
   end
 
@@ -1344,65 +1437,18 @@ defmodule AxonOnnx.Deserialize do
 
     base_padding = padding!(auto_pad, pads, kernel_size, strides)
 
-    # ONNX ceil_mode=1 rounds the output up. We lower this to a two-step
-    # adjustment so ordinary floor-mode pooling matches the spec output:
-    #
-    #   1. extra right-padding so the ceil-rounded count of windows fits
-    #   2. a trailing slice to drop any window whose start falls
-    #      entirely in the pad region ("last window starts on pad")
     spatial_rank = tuple_size(kernel_size)
 
     {padding_config, trim_per_axis} =
-      if ceil_mode == 1 do
-        explicit =
-          case base_padding do
-            list when is_list(list) -> list
-            :valid -> List.duplicate({0, 0}, spatial_rank)
-            # :same is shape-preserving already; ceil_mode is moot.
-            other -> other
-          end
-
-        case explicit do
-          list when is_list(list) ->
-            input_spatial =
-              case kernel_shape_from_axon!(inp) do
-                shape when is_tuple(shape) ->
-                  shape |> Tuple.to_list() |> Enum.take(-spatial_rank)
-              end
-
-            stride_list = expand_to_spatial(strides, spatial_rank)
-            dilation_list = expand_to_spatial(dilations, spatial_rank)
-
-            list
-            |> Enum.zip(input_spatial)
-            |> Enum.zip(Enum.zip(Tuple.to_list(kernel_size), Enum.zip(stride_list, dilation_list)))
-            |> Enum.map(fn {{{lo, hi}, in_dim}, {k, {s, d}}} ->
-              eff_k = (k - 1) * d + 1
-              numerator = in_dim + lo + hi - eff_k
-
-              ceil_out =
-                if numerator >= 0,
-                  do: div(numerator + s - 1, s) + 1,
-                  else: 1
-
-              last_start = (ceil_out - 1) * s
-              drop = if last_start >= in_dim + lo, do: 1, else: 0
-              kept_out = max(ceil_out - drop, 1)
-              required_padded = (ceil_out - 1) * s + eff_k
-              extra = max(required_padded - (in_dim + lo + hi), 0)
-              {{lo, hi + extra}, ceil_out - kept_out}
-            end)
-            |> Enum.unzip()
-            |> case do
-              {padding, trims} -> {padding, trims}
-            end
-
-          atom ->
-            {atom, List.duplicate(0, spatial_rank)}
-        end
-      else
-        {base_padding, List.duplicate(0, spatial_rank)}
-      end
+      maybe_ceil_mode_adjustment(
+        ceil_mode,
+        base_padding,
+        spatial_rank,
+        kernel_size,
+        strides,
+        dilations,
+        inp
+      )
 
     needs_trim = Enum.any?(trim_per_axis, &(&1 > 0))
     pool_name = if needs_trim, do: output_name <> "__pool", else: output_name

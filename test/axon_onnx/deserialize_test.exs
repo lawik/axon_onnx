@@ -467,11 +467,7 @@ defmodule DeserializeTest do
       # check_onnx_test_case!("node", "test_maxpool_with_argmax_2d_precomputed_pads")
       # check_onnx_test_case!("node", "test_maxpool_with_argmax_2d_precomputed_strides")
       check_onnx_test_case!("node", "test_maxpool_3d_default")
-
-      # TODO: Reevaluate this behavior
-      assert_raise ArgumentError, ~r/invalid ceil_mode/, fn ->
-        check_onnx_test_case!("node", "test_maxpool_2d_ceil")
-      end
+      check_onnx_test_case!("node", "test_maxpool_2d_ceil")
     end
 
     # test "Mean" do

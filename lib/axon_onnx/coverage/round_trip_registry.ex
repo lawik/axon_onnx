@@ -285,6 +285,7 @@ defmodule AxonOnnx.Coverage.RoundTripRegistry do
     {"node", "test_max_uint64"} => {:passing, nil},
     {"node", "test_max_uint8"} => {:passing, nil},
     {"node", "test_maxpool_1d_default"} => {:passing, nil},
+    {"node", "test_maxpool_2d_ceil"} => {:passing, nil},
     {"node", "test_maxpool_2d_default"} => {:passing, nil},
     {"node", "test_maxpool_2d_pads"} => {:passing, nil},
     {"node", "test_maxpool_2d_precomputed_pads"} => {:passing, nil},
