@@ -3977,7 +3977,13 @@ defmodule AxonOnnx.Deserialize do
          {axon, params, used_params}
        ) do
     constant_options = options!(attrs)
-    value = tensor!(constant_options["value"])
+
+    # Per spec, `value` defaults to a single f32 zero when omitted.
+    value =
+      case constant_options["value"] do
+        nil -> Nx.tensor(0.0, type: {:f, 32})
+        t -> tensor!(t)
+      end
 
     shape =
       cond do
