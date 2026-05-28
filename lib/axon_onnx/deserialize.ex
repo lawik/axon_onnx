@@ -748,27 +748,17 @@ defmodule AxonOnnx.Deserialize do
     qk = Nx.dot(q_4d, [3], [0, 1], Nx.transpose(k_repeated, axes: [0, 1, 3, 2]), [2], [0, 1])
     qk_scaled = Nx.multiply(qk, Nx.tensor(scale, type: Nx.type(qk)))
 
-    qk_softcapped =
-      case opts[:softcap] do
-        s when s == 0.0 or s == nil ->
-          qk_scaled
-
-        s ->
-          s_t = Nx.tensor(s, type: Nx.type(qk_scaled))
-          Nx.multiply(Nx.tanh(Nx.divide(qk_scaled, s_t)), s_t)
-      end
-
     causal_mask =
       if opts[:is_causal] do
-        # Lower-triangular True for kept (q can attend to k <= q + offset
-        # where offset = kv_seq - q_seq). Broadcast to the full score
-        # shape since Nx.select doesn't expand a lower-rank pred.
-        {b, nh, q_seq, kv_seq_v} = Nx.shape(qk_softcapped)
-        offset = kv_seq_v - q_seq
+        # Lower-triangular keep mask: position (i, j) is kept iff j <= i.
+        # When kv_seq > q_seq (past KV present) the extra trailing kv
+        # positions are masked too. Broadcast to the full score shape
+        # since Nx.select doesn't expand a lower-rank pred.
+        {b, nh, q_seq, kv_seq_v} = Nx.shape(qk_scaled)
         i = Nx.iota({q_seq, 1}, type: {:s, 64})
         j = Nx.iota({1, kv_seq_v}, type: {:s, 64})
 
-        Nx.less_equal(j, Nx.add(i, offset))
+        Nx.less_equal(j, i)
         |> Nx.reshape({1, 1, q_seq, kv_seq_v})
         |> Nx.broadcast({b, nh, q_seq, kv_seq_v})
       end
@@ -787,11 +777,18 @@ defmodule AxonOnnx.Deserialize do
           end
       end
 
-    scores =
+    # Per the ONNX-23 spec the qk_matmul_output is sampled at this point
+    # in the computation:
+    #   mode 0 = scale          (just qk_scaled)
+    #   mode 1 = scale + mask   (after user/causal mask applied)
+    #   mode 2 = scale + mask + softcap
+    #   mode 3 = probs (softmax of mode 2)
+    #
+    # The y output is always computed from the full chain
+    # (softmax(softcap(mask(scale(QK^T)))) @ V).
+    qk_with_mask =
       cond do
         causal_mask && user_mask_t ->
-          # Combine: user_mask is additive if float, multiplicative-bool
-          # otherwise. We treat ints/preds as boolean keep flags.
           umask =
             case Nx.type(user_mask_t) do
               {kind, _} when kind in [:f, :bf] -> user_mask_t
@@ -806,46 +803,54 @@ defmodule AxonOnnx.Deserialize do
 
           combined_keep =
             cond do
-              ukeep ->
-                Nx.logical_and(causal_mask, Nx.not_equal(ukeep, 0))
-              true ->
-                causal_mask
+              ukeep -> Nx.logical_and(causal_mask, Nx.not_equal(ukeep, 0))
+              true -> causal_mask
             end
 
-          scores =
+          partial =
             Nx.select(
               combined_keep,
-              qk_softcapped,
-              Nx.tensor(:neg_infinity, type: Nx.type(qk_softcapped))
+              qk_scaled,
+              Nx.tensor(:neg_infinity, type: Nx.type(qk_scaled))
             )
 
-          if umask, do: Nx.add(scores, umask), else: scores
+          if umask, do: Nx.add(partial, umask), else: partial
 
         causal_mask ->
           Nx.select(
             causal_mask,
-            qk_softcapped,
-            Nx.tensor(:neg_infinity, type: Nx.type(qk_softcapped))
+            qk_scaled,
+            Nx.tensor(:neg_infinity, type: Nx.type(qk_scaled))
           )
 
         user_mask_t ->
           case Nx.type(user_mask_t) do
             {kind, _} when kind in [:f, :bf] ->
-              Nx.add(qk_softcapped, user_mask_t)
+              Nx.add(qk_scaled, user_mask_t)
 
             _ ->
               Nx.select(
                 Nx.not_equal(user_mask_t, 0),
-                qk_softcapped,
-                Nx.tensor(:neg_infinity, type: Nx.type(qk_softcapped))
+                qk_scaled,
+                Nx.tensor(:neg_infinity, type: Nx.type(qk_scaled))
               )
           end
 
         true ->
-          qk_softcapped
+          qk_scaled
       end
 
-    probs = Axon.Activations.softmax(scores, axis: -1)
+    qk_softcapped =
+      case opts[:softcap] do
+        s when s == 0.0 or s == nil ->
+          qk_with_mask
+
+        s ->
+          s_t = Nx.tensor(s, type: Nx.type(qk_with_mask))
+          Nx.multiply(Nx.tanh(Nx.divide(qk_with_mask, s_t)), s_t)
+      end
+
+    probs = Axon.Activations.softmax(qk_softcapped, axis: -1)
     attn_out = Nx.dot(probs, [3], [0, 1], v_repeated, [2], [0, 1])
 
     # Reshape back to 3-D if the inputs were 3-D.
@@ -857,12 +862,17 @@ defmodule AxonOnnx.Deserialize do
         attn_out
       end
 
+    # ONNX-23 qk_matmul_output_mode sampling points along the chain:
+    #   0 - after scale only
+    #   1 - after scale + mask
+    #   2 - after scale + mask + softcap
+    #   3 - after softmax
     qk_out =
       case opts[:qk_matmul_output_mode] do
-        0 -> qk
-        1 -> qk_scaled
+        0 -> qk_scaled
+        1 -> qk_with_mask
         2 -> qk_softcapped
-        3 -> scores
+        3 -> probs
       end
 
     {y, k_full, v_full, qk_out}
@@ -3627,10 +3637,14 @@ defmodule AxonOnnx.Deserialize do
       Axon.layer(wrapper, layer_inputs, name: y_name <> "__attn_full", op_name: :attention)
 
     # Attention produces up to 4 outputs: y, present_key, present_value,
-    # qk_matmul_output. We expose y and any requested extras by
-    # decomposing via element-of-tuple layers.
+    # qk_matmul_output. We expose only the ones the model actually wires
+    # up — skip outputs with empty names (the spec uses "" to indicate
+    # "don't emit this slot").
+    _ = extra_outputs
+
     layers =
       Enum.with_index(outputs)
+      |> Enum.reject(fn {name, _idx} -> name in ["", nil] end)
       |> Enum.map(fn {name, idx} ->
         layer =
           Axon.nx(
@@ -3644,8 +3658,6 @@ defmodule AxonOnnx.Deserialize do
 
         {name, layer}
       end)
-
-    _ = extra_outputs
 
     updated_axon =
       Enum.reduce(layers, axon, fn {name, layer}, acc -> Map.put(acc, name, layer) end)
@@ -5093,7 +5105,18 @@ defmodule AxonOnnx.Deserialize do
       end
 
     fun = fn input ->
-      Enum.reduce(axes, input, fn axis, x -> Nx.new_axis(x, axis) end)
+      input_rank = Nx.rank(input)
+      final_rank = input_rank + length(axes)
+
+      # ONNX spec: axes refer to positions in the FINAL output rank.
+      # Normalise negatives against the final rank, then apply ascending
+      # so each Nx.new_axis call sees a partial rank that's consistent.
+      sorted =
+        axes
+        |> Enum.map(fn a -> if a < 0, do: a + final_rank, else: a end)
+        |> Enum.sort()
+
+      Enum.reduce(sorted, input, fn axis, x -> Nx.new_axis(x, axis) end)
     end
 
     case get_axon_node(inp) do
