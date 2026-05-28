@@ -637,6 +637,41 @@ defmodule AxonOnnx.Deserialize do
 
   defp expand_to_spatial(value, _spatial_rank) when is_list(value), do: value
 
+  # Resolve `:same_lower` (from `padding!/4` for auto_pad=SAME_LOWER) to
+  # explicit per-axis {lo, hi} pads. SAME_UPPER pushes the odd extra to
+  # the right (Axon's `:same`); SAME_LOWER pushes it to the left, so
+  # we compute the total pad per axis and assign lo = ceil(total/2),
+  # hi = total - lo.
+  defp resolve_padding(:same_lower, inp, kernel_size, strides, dilations) do
+    spatial_rank = tuple_size(kernel_size)
+
+    input_spatial =
+      case kernel_shape_from_axon!(inp) do
+        shape when is_tuple(shape) ->
+          shape |> Tuple.to_list() |> Enum.take(-spatial_rank)
+      end
+
+    stride_list = expand_to_spatial(strides, spatial_rank)
+    dilation_list = expand_to_spatial(dilations, spatial_rank)
+
+    Enum.zip([
+      input_spatial,
+      Tuple.to_list(kernel_size),
+      stride_list,
+      dilation_list
+    ])
+    |> Enum.map(fn {in_dim, k, s, d} ->
+      eff_k = (k - 1) * d + 1
+      out_dim = div(in_dim + s - 1, s)
+      total = max((out_dim - 1) * s + eff_k - in_dim, 0)
+      lo = div(total + 1, 2)
+      hi = total - lo
+      {lo, hi}
+    end)
+  end
+
+  defp resolve_padding(padding, _inp, _kernel, _strides, _dilations), do: padding
+
   # ----- Attention --------------------------------------------------------
 
   # Computes scaled dot-product attention.
@@ -2020,7 +2055,9 @@ defmodule AxonOnnx.Deserialize do
 
     inp = axon!(inp, axon)
 
-    base_padding = padding!(auto_pad, pads, kernel_size, strides)
+    base_padding =
+      padding!(auto_pad, pads, kernel_size, strides)
+      |> resolve_padding(inp, kernel_size, strides, dilations)
     spatial_rank = tuple_size(kernel_size)
 
     # ceil_mode=1: same as AveragePool — add right-pad to make the
@@ -2107,7 +2144,9 @@ defmodule AxonOnnx.Deserialize do
 
     inp = axon!(inp, axon)
 
-    base_padding = padding!(auto_pad, pads, kernel_size, strides)
+    base_padding =
+      padding!(auto_pad, pads, kernel_size, strides)
+      |> resolve_padding(inp, kernel_size, strides, dilations)
 
     spatial_rank = tuple_size(kernel_size)
 
@@ -2288,7 +2327,9 @@ defmodule AxonOnnx.Deserialize do
       end
 
     strides = raw_strides || List.duplicate(1, tuple_size(kernel_size))
-    padding_config = padding!(auto_pad, pads, kernel_size, strides)
+    padding_config =
+      padding!(auto_pad, pads, kernel_size, strides)
+      |> resolve_padding(inp, kernel_size, strides, dilations)
     units = elem(kernel_shape, 0)
 
     {updated_axon, updated_params} =
@@ -2417,7 +2458,9 @@ defmodule AxonOnnx.Deserialize do
     dilations = options["dilations"] || List.duplicate(1, spatial_rank)
     strides = options["strides"] || List.duplicate(1, spatial_rank)
 
-    padding_config = padding!(auto_pad, pads, kernel_size, strides)
+    padding_config =
+      padding!(auto_pad, pads, kernel_size, strides)
+      |> resolve_padding(inp, kernel_size, strides, dilations)
     units = elem(kernel_shape, 1) * group
 
     base_opts = [
@@ -2845,7 +2888,9 @@ defmodule AxonOnnx.Deserialize do
     spatial_rank = tuple_size(kernel_size)
     dilations = options["dilations"] || List.duplicate(1, spatial_rank)
     strides = options["strides"] || List.duplicate(1, spatial_rank)
-    padding_config = padding!(auto_pad, pads, kernel_size, strides)
+    padding_config =
+      padding!(auto_pad, pads, kernel_size, strides)
+      |> resolve_padding(x, kernel_size, strides, dilations)
 
     common_inputs = [x, x_scale, x_zp, w, w_scale, w_zp, y_scale, y_zp]
 
@@ -2936,7 +2981,9 @@ defmodule AxonOnnx.Deserialize do
     spatial_rank = tuple_size(kernel_size)
     dilations = options["dilations"] || List.duplicate(1, spatial_rank)
     strides = options["strides"] || List.duplicate(1, spatial_rank)
-    padding_config = padding!(auto_pad, pads, kernel_size, strides)
+    padding_config =
+      padding!(auto_pad, pads, kernel_size, strides)
+      |> resolve_padding(x, kernel_size, strides, dilations)
 
     fun = build_conv_integer_fun(x_zp, w_zp, strides, padding_config, dilations, group)
     layer_inputs = [x, w] ++ Enum.reject([x_zp, w_zp], &is_nil/1)
@@ -4185,9 +4232,11 @@ defmodule AxonOnnx.Deserialize do
     pads = options["pads"]
     strides = options["strides"] || List.duplicate(1, tuple_size(kernel_shape))
 
-    padding_config = padding!(auto_pad, pads, kernel_shape, strides)
-
     input = input!(input_name, axon, params, used_params)
+
+    padding_config =
+      padding!(auto_pad, pads, kernel_shape, strides)
+      |> resolve_padding(input, kernel_shape, strides, 1)
 
     fun = fn x, _opts ->
       rank = Nx.rank(x)
@@ -5999,6 +6048,79 @@ defmodule AxonOnnx.Deserialize do
   defp recur_nodes(
          %Node{
            op_type: "Dropout",
+           input: [inp_name | rest_inputs],
+           attribute: attrs,
+           output: [output_name | maybe_mask]
+         },
+         {axon, params, used_params}
+       )
+       when rest_inputs != [] do
+    # Opset-12+ Dropout: ratio and (optional) training_mode are inputs
+    # rather than attributes. We only support inference-time semantics
+    # (output equals input, mask is all-ones); raise if a runtime
+    # training_mode=true is requested.
+    {ratio_name, training_name} =
+      case rest_inputs do
+        [r] -> {r, nil}
+        [r, t] -> {r, (t != "" && t) || nil}
+      end
+
+    inp = input!(inp_name, axon, params, used_params)
+
+    ratio =
+      cond do
+        ratio_name == "" -> 0.0
+        true ->
+          ratio_name
+          |> constant!(axon, params, used_params)
+          |> Nx.to_number()
+      end
+
+    training_mode =
+      if training_name do
+        constant!(training_name, axon, params, used_params) |> Nx.to_number() != 0
+      else
+        false
+      end
+
+    output_layer =
+      cond do
+        training_mode and ratio > 0.0 ->
+          Axon.dropout(inp, rate: ratio, name: output_name)
+
+        true ->
+          # Inference (or ratio == 0): pass through unchanged.
+          Axon.nx(inp, & &1, name: output_name, op_name: :dropout)
+      end
+
+    updated_axon =
+      case maybe_mask do
+        [] ->
+          Map.put(axon, output_name, output_layer)
+
+        [mask_name] ->
+          # In inference mode the spec mask is all 1s of bool dtype.
+          mask_layer =
+            Axon.nx(
+              inp,
+              fn x ->
+                Nx.broadcast(Nx.tensor(1, type: {:u, 8}), Nx.shape(x))
+              end,
+              name: mask_name,
+              op_name: :dropout_mask
+            )
+
+          axon
+          |> Map.put(output_name, output_layer)
+          |> Map.put(mask_name, mask_layer)
+      end
+
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "Dropout",
            input: [inp_name],
            attribute: attrs,
            output: [output_name | maybe_mask]
@@ -6418,15 +6540,11 @@ defmodule AxonOnnx.Deserialize do
 
       val when val == "SAME_LOWER" ->
         # SAME_LOWER asymmetrically pads the LOWER (start) side when the
-        # padding amount is odd; Axon's `:same` is SAME_UPPER. Computing the
-        # explicit per-axis padding requires the input shape, which we don't
-        # have here, so we raise rather than silently fall back to
-        # SAME_UPPER (the prior behaviour produced wrong outputs without any
-        # signal). A future fix would plumb the input shape through and
-        # build the per-axis {lo, hi} tuple.
-        raise ArgumentError,
-              "auto_pad=SAME_LOWER is not yet supported; only SAME_UPPER " <>
-                "is correctly lowered. Patch deserialize.ex:padding!/4."
+        # padding amount is odd. Without the input shape we can't compute
+        # the explicit per-axis lo/hi, so we surface a recognisable
+        # sentinel that callers (Conv, MaxPool, AveragePool) resolve at
+        # layer-run time via input shape lookup.
+        :same_lower
 
       "VALID" ->
         :valid

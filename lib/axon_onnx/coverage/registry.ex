@@ -1286,6 +1286,14 @@ defmodule AxonOnnx.Coverage.Registry do
     {"node", "test_sce_none_weights_log_prob_expanded"} => {:passing, nil},
     {"node", "test_sce_sum_expanded"} => {:passing, nil},
     {"node", "test_sce_sum_log_prob_expanded"} => {:passing, nil},
+    {"node", "test_dropout_default_mask_ratio"} => {:passing, nil},
+    {"node", "test_conv_with_autopad_same"} => {:passing, nil},
+    {"node", "test_averagepool_2d_same_lower"} => {:passing, nil},
+    {"node", "test_lppool_2d_same_lower"} => {:passing, nil},
+    {"node", "test_maxpool_2d_same_lower"} => {:passing, nil},
+    {"node", "test_dropout_default_ratio"} => {:passing, nil},
+    {"node", "test_training_dropout_zero_ratio_mask"} => {:passing, nil},
+    {"node", "test_training_dropout_zero_ratio"} => {:passing, nil},
   }
 
   @doc "Returns the raw `{category, name} => {status, note}` map."
