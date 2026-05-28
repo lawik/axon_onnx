@@ -27,3 +27,4 @@ axon_onnx-*.tar
 
 .test-cache/
 test/cases
+/.claude/
