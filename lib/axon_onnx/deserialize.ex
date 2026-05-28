@@ -637,6 +637,18 @@ defmodule AxonOnnx.Deserialize do
 
   defp expand_to_spatial(value, _spatial_rank) when is_list(value), do: value
 
+  # Returns the permutation that swaps axes `a` and `b` in a tensor of
+  # rank `rank`. e.g. `swap_axes(4, 0, 1)` is `[1, 0, 2, 3]`.
+  defp swap_axes(rank, a, b) do
+    Enum.map(0..(rank - 1)//1, fn i ->
+      cond do
+        i == a -> b
+        i == b -> a
+        true -> i
+      end
+    end)
+  end
+
   # ONNX ceil_mode=1 rounds the spatial output dim up. Lower it to a
   # two-step adjustment so the floor-mode pool used downstream matches
   # spec output:
@@ -2511,6 +2523,344 @@ defmodule AxonOnnx.Deserialize do
 
     updated_axon = Map.put(axon, output_name, layer)
     {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "ReverseSequence",
+           attribute: attrs,
+           input: [data_name, lens_name],
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # Per-batch reverse of variable-length sequences along time_axis.
+    # `sequence_lens` is a 1-D int tensor of per-batch lengths.
+    opts = options!(attrs)
+    batch_axis = opts["batch_axis"] || 1
+    time_axis = opts["time_axis"] || 0
+
+    data = input!(data_name, axon, params, used_params)
+    lens = constant!(lens_name, axon, params, used_params) |> Nx.to_flat_list()
+
+    fun = fn x, opts ->
+      ba = opts[:batch_axis]
+      ta = opts[:time_axis]
+      ls = opts[:lens]
+      shape = Nx.shape(x)
+      rank = tuple_size(shape)
+      t_dim = elem(shape, ta)
+
+      # Permute so batch is axis 0 and time is axis 1.
+      x_perm =
+        cond do
+          ba == 0 and ta == 1 ->
+            x
+
+          ba == 1 and ta == 0 ->
+            Nx.transpose(x, axes: swap_axes(rank, 0, 1))
+
+          true ->
+            raise ArgumentError,
+                  "ReverseSequence batch_axis=#{ba} time_axis=#{ta} not supported"
+        end
+
+      # Build per-batch time index map of shape {N, T}: reverse 0..l-1
+      # and keep the rest.
+      per_batch =
+        Enum.map(ls, fn l ->
+          rev = if l > 0, do: Enum.to_list((l - 1)..0//-1), else: []
+          tail = Enum.to_list(l..(t_dim - 1)//1)
+          rev ++ tail
+        end)
+
+      indices_2d = Nx.tensor(per_batch, type: {:s, 64})
+
+      # Broadcast indices to the full perm shape so take_along_axis can
+      # gather along axis 1 (time).
+      perm_shape = Nx.shape(x_perm)
+      trailing_ones = List.duplicate(1, tuple_size(perm_shape) - 2)
+      idx_shape = List.to_tuple([elem(perm_shape, 0), t_dim | trailing_ones])
+      indices_b = Nx.reshape(indices_2d, idx_shape) |> Nx.broadcast(perm_shape)
+
+      x_rev = Nx.take_along_axis(x_perm, indices_b, axis: 1)
+
+      if ba == 1 and ta == 0,
+        do: Nx.transpose(x_rev, axes: swap_axes(rank, 0, 1)),
+        else: x_rev
+    end
+
+    layer =
+      Axon.layer(fun, [data],
+        name: output_name,
+        op_name: :reverse_sequence,
+        batch_axis: batch_axis,
+        time_axis: time_axis,
+        lens: lens
+      )
+
+    {Map.put(axon, output_name, layer), params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "MaxUnpool",
+           attribute: attrs,
+           input: inputs,
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # MaxUnpool scatters the pooled values back into a zero tensor of
+    # the original input shape, using the argmax indices produced by a
+    # paired MaxPool. We support the (xT, xI) two-input form; the
+    # optional output_shape input is consumed when present.
+    opts = options!(attrs)
+    kernel_shape = opts["kernel_shape"]
+    strides = opts["strides"] || kernel_shape
+    pads = opts["pads"] || List.duplicate(0, 2 * length(kernel_shape))
+
+    {xt_name, xi_name, output_shape_name} =
+      case inputs do
+        [xt, xi] -> {xt, xi, nil}
+        [xt, xi, os] -> {xt, xi, os}
+      end
+
+    xt = input!(xt_name, axon, params, used_params)
+    xi = input!(xi_name, axon, params, used_params)
+
+    output_shape =
+      cond do
+        output_shape_name && output_shape_name != "" ->
+          constant!(output_shape_name, axon, params, used_params)
+          |> Nx.to_flat_list()
+
+        true ->
+          input_spatial = kernel_shape_from_axon!(xt) |> Tuple.to_list()
+          spatial_rank = length(kernel_shape)
+          spatial_in = Enum.take(input_spatial, -spatial_rank)
+          lo_pads = Enum.take(pads, spatial_rank)
+          hi_pads = Enum.drop(pads, spatial_rank)
+
+          leading = Enum.take(input_spatial, -spatial_rank * 0)
+          _ = leading
+
+          spatial_out =
+            Enum.zip([spatial_in, kernel_shape, strides, lo_pads, hi_pads])
+            |> Enum.map(fn {in_dim, k, s, lo, hi} ->
+              (in_dim - 1) * s + k - lo - hi
+            end)
+
+          batch_channel = Enum.take(input_spatial, length(input_spatial) - spatial_rank)
+          batch_channel ++ spatial_out
+      end
+
+    fun = fn xt, xi, opts ->
+      out_shape = List.to_tuple(opts[:output_shape])
+      out_size = Enum.reduce(opts[:output_shape], 1, &Kernel.*/2)
+      batch_n = elem(out_shape, 0)
+      chan_n = elem(out_shape, 1)
+      per_batch_channel = div(out_size, batch_n * chan_n)
+
+      xi64 = Nx.as_type(xi, {:s, 64})
+
+      # The indices in xi are flat positions within each (batch, channel)
+      # slice. To scatter into a flat {N*C*...} output we add the
+      # per-(batch, channel) offset.
+      offsets =
+        Nx.iota({batch_n * chan_n}, type: {:s, 64})
+        |> Nx.multiply(per_batch_channel)
+        |> Nx.reshape(List.to_tuple([batch_n, chan_n | List.duplicate(1, tuple_size(Nx.shape(xi)) - 2)]))
+
+      flat_indices = Nx.add(xi64, offsets) |> Nx.flatten()
+      flat_values = Nx.flatten(xt)
+
+      zeros = Nx.broadcast(Nx.tensor(0.0, type: Nx.type(xt)), {out_size})
+
+      zeros
+      |> Nx.indexed_put(Nx.new_axis(flat_indices, 1), flat_values)
+      |> Nx.reshape(out_shape)
+    end
+
+    layer =
+      Axon.layer(fun, [xt, xi],
+        name: output_name,
+        op_name: :max_unpool,
+        output_shape: output_shape
+      )
+
+    {Map.put(axon, output_name, layer), params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "CenterCropPad",
+           attribute: attrs,
+           input: [data_name, shape_name],
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # CenterCropPad: per-axis center-crop OR center-pad to match the
+    # target shape. `axes` (optional) restricts which axes are touched.
+    target_shape =
+      constant!(shape_name, axon, params, used_params)
+      |> Nx.to_flat_list()
+
+    axes_attr = options!(attrs)["axes"]
+    data = input!(data_name, axon, params, used_params)
+
+    fun = fn x, opts ->
+      target = opts[:target_shape]
+      axes = opts[:axes]
+      rank = Nx.rank(x)
+
+      pos_axes =
+        cond do
+          is_nil(axes) -> Enum.to_list(0..(rank - 1)//1)
+          true -> Enum.map(axes, fn a -> if a < 0, do: a + rank, else: a end)
+        end
+
+      target_map = Enum.zip(pos_axes, target) |> Map.new()
+
+      # First crop each axis if input is bigger than target, then pad
+      # any axes where target is bigger than (cropped) input.
+      cropped =
+        Enum.reduce(pos_axes, x, fn axis, acc ->
+          in_dim = Nx.axis_size(acc, axis)
+          t = Map.fetch!(target_map, axis)
+          cond do
+            in_dim > t ->
+              start = div(in_dim - t, 2)
+              Nx.slice_along_axis(acc, start, t, axis: axis)
+
+            true ->
+              acc
+          end
+        end)
+
+      pad_config =
+        Enum.map(0..(rank - 1)//1, fn axis ->
+          if Enum.member?(pos_axes, axis) do
+            in_dim = Nx.axis_size(cropped, axis)
+            t = Map.fetch!(target_map, axis)
+            if t > in_dim do
+              lo = div(t - in_dim, 2)
+              hi = t - in_dim - lo
+              {lo, hi, 0}
+            else
+              {0, 0, 0}
+            end
+          else
+            {0, 0, 0}
+          end
+        end)
+
+      if Enum.any?(pad_config, fn {lo, hi, _} -> lo > 0 or hi > 0 end) do
+        Nx.pad(cropped, Nx.tensor(0, type: Nx.type(cropped)), pad_config)
+      else
+        cropped
+      end
+    end
+
+    layer =
+      Axon.layer(fun, [data],
+        name: output_name,
+        op_name: :center_crop_pad,
+        target_shape: target_shape,
+        axes: axes_attr
+      )
+
+    {Map.put(axon, output_name, layer), params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{op_type: "SpaceToDepth", attribute: attrs, input: [input_name], output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    # SpaceToDepth: {N, C, H, W} → {N, C*B*B, H/B, W/B} via
+    # reshape → transpose → reshape.
+    b = options!(attrs)["blocksize"]
+    input = input!(input_name, axon, params, used_params)
+
+    fun = fn x, opts ->
+      block = opts[:blocksize]
+      {n, c, h, w} = Nx.shape(x)
+      x
+      |> Nx.reshape({n, c, div(h, block), block, div(w, block), block})
+      |> Nx.transpose(axes: [0, 3, 5, 1, 2, 4])
+      |> Nx.reshape({n, c * block * block, div(h, block), div(w, block)})
+    end
+
+    apply_fun = &fun.(&1, blocksize: b)
+
+    layer =
+      case get_axon_node(input) do
+        %Axon.Node{op: :constant, opts: [value: v]} ->
+          Axon.constant(apply_fun.(v), name: output_name)
+
+        %Axon.Node{} ->
+          Axon.layer(fun, [input], name: output_name, op_name: :space_to_depth, blocksize: b)
+
+        %Nx.Tensor{} = t ->
+          Axon.constant(apply_fun.(t), name: output_name)
+      end
+
+    {Map.put(axon, output_name, layer), params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{op_type: "DepthToSpace", attribute: attrs, input: [input_name], output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    # DepthToSpace: inverse of SpaceToDepth. `mode` controls how the
+    # depth axis is interpreted before reshape: DCR (default) groups
+    # block-row × block-col × channel; CRD groups channel × block-row ×
+    # block-col. (Note: we keep this option under `:block_mode` since
+    # `Axon.layer/3` claims `:mode` for inference/train selection.)
+    opts = options!(attrs)
+    b = opts["blocksize"]
+    mode = opts["mode"] || "DCR"
+    input = input!(input_name, axon, params, used_params)
+
+    fun = fn x, opts ->
+      block = opts[:blocksize]
+      m = opts[:block_mode]
+      {n, c, h, w} = Nx.shape(x)
+      c_out = div(c, block * block)
+
+      {reshape_a, transpose_axes} =
+        case m do
+          "DCR" -> {{n, block, block, c_out, h, w}, [0, 3, 4, 1, 5, 2]}
+          "CRD" -> {{n, c_out, block, block, h, w}, [0, 1, 4, 2, 5, 3]}
+        end
+
+      x
+      |> Nx.reshape(reshape_a)
+      |> Nx.transpose(axes: transpose_axes)
+      |> Nx.reshape({n, c_out, h * block, w * block})
+    end
+
+    apply_fun = &fun.(&1, blocksize: b, block_mode: mode)
+
+    layer =
+      case get_axon_node(input) do
+        %Axon.Node{op: :constant, opts: [value: v]} ->
+          Axon.constant(apply_fun.(v), name: output_name)
+
+        %Axon.Node{} ->
+          Axon.layer(fun, [input],
+            name: output_name,
+            op_name: :depth_to_space,
+            blocksize: b,
+            block_mode: mode
+          )
+
+        %Nx.Tensor{} = t ->
+          Axon.constant(apply_fun.(t), name: output_name)
+      end
+
+    {Map.put(axon, output_name, layer), params, used_params}
   end
 
   defp recur_nodes(
