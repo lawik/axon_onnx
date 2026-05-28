@@ -191,29 +191,36 @@ defmodule AxonOnnx.Shared do
   end
 
   defp do_slice(shape, {start, stop, axis, stride}, acc) do
-    start = if start < 0, do: start + elem(shape, axis), else: start
-
-    start =
-      if stride < 0,
-        do: clamp_to_range(start, 0, elem(shape, axis) - 1),
-        else: clamp_to_range(start, 0, elem(shape, axis))
-
-    stop = if stop < 0, do: stop + elem(shape, axis), else: stop
-
-    stop =
-      if stride < 0,
-        do: clamp_to_range(stop, -1, elem(shape, axis) - 1),
-        else: clamp_to_range(stop, 0, elem(shape, axis))
+    dim = elem(shape, axis)
+    start = if start < 0, do: start + dim, else: start
+    stop = if stop < 0, do: stop + dim, else: stop
 
     if stride < 0 do
-      len = start - stop
+      # Negative-stride slice: clamp to NumPy's [-1, dim-1] range, then
+      # reverse the axis and slice with the positive stride. The reversed
+      # start coordinate is (dim - 1 - original_start), and we walk
+      # `n - 1` strides forward to cover the same indices.
+      start_c = clamp_to_range(start, 0, dim - 1)
+      stop_c = clamp_to_range(stop, -1, dim - 1)
+      abs_stride = -stride
+      range_len = start_c - stop_c
 
-      acc
-      |> Nx.reverse(axes: [axis])
-      |> Nx.slice_along_axis(start, len, axis: axis, strides: abs(stride))
+      if range_len > 0 do
+        n = div(range_len + abs_stride - 1, abs_stride)
+        new_start = dim - 1 - start_c
+        len = (n - 1) * abs_stride + 1
+
+        acc
+        |> Nx.reverse(axes: [axis])
+        |> Nx.slice_along_axis(new_start, len, axis: axis, strides: abs_stride)
+      else
+        Nx.slice_along_axis(acc, 0, 0, axis: axis)
+      end
     else
-      len = stop - start
-      Nx.slice_along_axis(acc, start, len, axis: axis, strides: stride)
+      start_c = clamp_to_range(start, 0, dim)
+      stop_c = clamp_to_range(stop, 0, dim)
+      len = max(stop_c - start_c, 0)
+      Nx.slice_along_axis(acc, start_c, len, axis: axis, strides: stride)
     end
   end
 
@@ -293,6 +300,25 @@ defmodule AxonOnnx.Shared do
   def onnx_type_to_nx_type(14), do: {:c, 64}
   def onnx_type_to_nx_type(15), do: {:c, 128}
   def onnx_type_to_nx_type(16), do: {:bf, 16}
+
+  def onnx_type_to_nx_type(n) when is_integer(n) do
+    name =
+      case n do
+        17 -> "FLOAT8E4M3FN"
+        18 -> "FLOAT8E4M3FNUZ"
+        19 -> "FLOAT8E5M2"
+        20 -> "FLOAT8E5M2FNUZ"
+        21 -> "UINT4"
+        22 -> "INT4"
+        23 -> "FLOAT4E2M1"
+        24 -> "FLOAT8E8M0"
+        25 -> "INT2"
+        26 -> "UINT2"
+        _ -> "unknown ONNX type #{n}"
+      end
+
+    raise ArgumentError, "unsupported ONNX dtype: #{name}"
+  end
 
   def nx_type_to_onnx_type({:f, 32}), do: 1
   def nx_type_to_onnx_type({:u, 8}), do: 2

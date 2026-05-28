@@ -75,14 +75,15 @@ defmodule AxonOnnx.Coverage do
     data_paths = path |> Path.join("test_data_set_*") |> Path.wildcard() |> Enum.sort()
 
     try do
-      {model, params} = AxonOnnx.import(model_path)
-
-      # Use the proto's graph.input order, NOT Map.keys(Axon.get_inputs/1)
-      # which is alphabetical. The corpus' input_N.pb files are numbered to
-      # match the proto's graph.input order; mapping them by Map.keys yields
-      # scrambled assignments for any model whose input names aren't already
-      # alphabetical (e.g. Trilu's [x, k]).
       proto_input_names = proto_input_names(model_path)
+      fold_candidates = load_fold_candidates(data_paths, proto_input_names)
+      # Some corpus models declare static-only parameters (e.g. Squeeze's
+      # `axes`, Slice's `starts`/`ends`, Reshape's shape) as graph inputs
+      # rather than initializers. We fold them in only when the deserializer
+      # signals it needs the value as a constant — that way data-flow inputs
+      # remain runtime Axon inputs (so `predict` can still receive them).
+      {model, params, _folded} = import_with_static_fold(model_path, fold_candidates)
+
       axon_input_names = MapSet.new(Map.keys(Axon.get_inputs(model)))
 
       Enum.each(data_paths, fn data_path ->
@@ -237,6 +238,82 @@ defmodule AxonOnnx.Coverage do
     |> File.read!()
     |> Onnx.TensorProto.decode!()
     |> tensor!()
+  end
+
+  # Load test_data_set_0's inputs as a map of name → tensor, suitable for
+  # `AxonOnnx.import(_, fold_inputs: ...)`. Empty/unsupported tensors are
+  # silently skipped (they can't be folded anyway).
+  defp load_fold_candidates([], _input_names), do: %{}
+
+  defp load_fold_candidates([first_set | _], input_names) do
+    input_paths =
+      first_set
+      |> Path.join("input_*.pb")
+      |> Path.wildcard()
+      |> Enum.sort()
+
+    input_paths
+    |> Enum.zip(input_names)
+    |> Enum.reduce(%{}, fn {path, name}, acc ->
+      try do
+        Map.put(acc, name, pb_to_tensor(path))
+      rescue
+        _ -> acc
+      end
+    end)
+  end
+
+  # Try `AxonOnnx.import/2` with an incremental set of folded inputs:
+  # start with no folds; on "expected value X to be constant" / "to be a
+  # graph input"-style errors, add X to the fold set and retry. Stops when
+  # the import succeeds or the failure isn't one of those patterns.
+  defp import_with_static_fold(model_path, candidates) do
+    do_import_with_static_fold(model_path, candidates, %{}, 0, MapSet.new())
+  end
+
+  defp do_import_with_static_fold(_model_path, _candidates, _fold, n, _seen) when n > 32 do
+    raise "import retry limit reached"
+  end
+
+  defp do_import_with_static_fold(model_path, candidates, fold, n, seen) do
+    try do
+      {model, params} = AxonOnnx.import(model_path, fold_inputs: fold)
+      {model, params, fold}
+    rescue
+      e ->
+        msg = Exception.message(e)
+
+        case extract_static_required_input(msg) do
+          nil ->
+            reraise(e, __STACKTRACE__)
+
+          name ->
+            cond do
+              MapSet.member?(seen, name) ->
+                reraise(e, __STACKTRACE__)
+
+              not Map.has_key?(candidates, name) ->
+                reraise(e, __STACKTRACE__)
+
+              true ->
+                next_fold = Map.put(fold, name, Map.fetch!(candidates, name))
+                do_import_with_static_fold(model_path, candidates, next_fold, n + 1, MapSet.put(seen, name))
+            end
+        end
+    end
+  end
+
+  # Patterns the deserializer raises when an op needs an input as a static
+  # constant (e.g. Squeeze axes, Slice starts/ends, Reshape shape). The
+  # returned name is the graph-input we should fold.
+  defp extract_static_required_input(msg) do
+    cond do
+      m = Regex.run(~r/expected value (\S+) to be constant value/, msg) -> Enum.at(m, 1)
+      m = Regex.run(~r/expected value (\S+) to be a graph input/, msg) -> Enum.at(m, 1)
+      m = Regex.run(~r/axes input (?:"([^"]+)"|(\S+))/, msg) -> Enum.at(m, 1) || Enum.at(m, 2)
+      m = Regex.run(~r/Reduction axes via runtime graph input.*axes input "([^"]+)"/, msg) -> Enum.at(m, 1)
+      true -> nil
+    end
   end
 
   defp tensor!(%Onnx.TensorProto{data_type: dtype, dims: dims} = tensor) do

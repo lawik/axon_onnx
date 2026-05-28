@@ -1265,6 +1265,7 @@ defmodule AxonOnnx.Serialize do
            op: op,
            op_name: op_name,
            name: name_fn,
+           opts: node_opts,
            parent: [a_id, b_id]
          },
          nodes_map,
@@ -1296,12 +1297,21 @@ defmodule AxonOnnx.Serialize do
           {name, op_counts, cache}
       end
 
+    # Mod carries an `fmod` opt (0 = Python-style, 1 = C-style); ONNX
+    # requires fmod=1 for floats and defaults to 0 for ints.
+    attrs =
+      case {op_name, node_opts && Keyword.get(node_opts, :fmod)} do
+        {:mod, nil} -> []
+        {:mod, val} when val in [0, 1] -> [to_attr("fmod", :INT, val)]
+        _ -> []
+      end
+
     node = %Node{
       input: [cache[a_id], cache[b_id]],
       output: [name],
       name: name,
       op_type: onnx_op,
-      attribute: []
+      attribute: attrs
     }
 
     {inputs, param_names, [node | nodes], op_counts, cache}
