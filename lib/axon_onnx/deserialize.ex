@@ -331,6 +331,7 @@ defmodule AxonOnnx.Deserialize do
     {"HardSigmoid", :hard_sigmoid, [alpha: {"alpha", 0.2}, beta: {"beta", 0.5}]},
     {"LeakyRelu", :leaky_relu, [alpha: {"alpha", 1.0e-2}]},
     {"LogSoftmax", :log_softmax, [axis: {"axis", -1}]},
+    {"Mish", :mish, []},
     {"Relu", :relu, []},
     {"Selu", :selu,
      [alpha: {"alpha", 1.67326319217681884765625}, gamma: {"gamma", 1.05070102214813232421875}]},
@@ -1839,34 +1840,35 @@ defmodule AxonOnnx.Deserialize do
     scale = input!(scale_name, axon, params, used_params)
     bias = input!(b_name, axon, params, used_params)
 
-    {updated_axon, updated_params} =
-      case {get_axon_node(input), get_axon_node(scale), get_axon_node(bias)} do
-        {%Axon.Node{}, %Nx.Tensor{} = scale, %Nx.Tensor{} = bias} ->
-          out = Axon.instance_norm(input, name: output_name, epsilon: options["epsilon"])
+    epsilon = options["epsilon"] || 1.0e-5
 
-          updated_params =
-            Map.put(used_params, output_name, %{
-              "gamma" => scale,
-              "beta" => bias,
-              "mean" => Nx.tensor(0.0),
-              "var" => Nx.tensor(1.0)
-            })
+    # Hand-roll the normalisation rather than going through
+    # Axon.instance_norm — that path defaults to channels=:last while ONNX
+    # is channels-first, and its scale/bias parameter shapes don't take
+    # well to the corpus's rank-1 weights.
+    fun = fn x, scale, bias, opts ->
+      eps = opts[:epsilon]
+      rank = Nx.rank(x)
+      spatial_axes = Enum.to_list(2..(rank - 1)//1)
+      mean = Nx.mean(x, axes: spatial_axes, keep_axes: true)
+      var = Nx.variance(x, axes: spatial_axes, keep_axes: true)
+      normalised = Nx.divide(Nx.subtract(x, mean), Nx.sqrt(Nx.add(var, eps)))
 
-          updated_axon = Map.put(axon, output_name, out)
-          {updated_axon, updated_params}
+      param_shape = List.to_tuple([1, Nx.axis_size(x, 1) | List.duplicate(1, rank - 2)])
+      scale_r = Nx.reshape(scale, param_shape)
+      bias_r = Nx.reshape(bias, param_shape)
+      Nx.add(Nx.multiply(normalised, scale_r), bias_r)
+    end
 
-        {%Axon.Node{}, %Axon.Node{}, %Axon.Node{}} ->
-          out =
-            instance_normalization(input, scale, bias,
-              epsilon: options["epsilon"],
-              name: output_name
-            )
+    out =
+      Axon.layer(fun, [input, scale, bias],
+        name: output_name,
+        op_name: :instance_norm,
+        epsilon: epsilon
+      )
 
-          updated_axon = Map.put(axon, output_name, out)
-          {updated_axon, used_params}
-      end
-
-    {updated_axon, params, updated_params}
+    updated_axon = Map.put(axon, output_name, out)
+    {updated_axon, params, used_params}
   end
 
   defp recur_nodes(
@@ -2445,10 +2447,7 @@ defmodule AxonOnnx.Deserialize do
        ) do
     # ScatterElements writes updates into data at positions derived by
     # combining the per-element indices with the surrounding coordinates of
-    # the indices tensor. We support reduction in {none, add} via
-    # Nx.indexed_put / Nx.indexed_add. Reductions mul/min/max are not
-    # implemented and raise from do_scatter_elements/5 below — those cases
-    # stay :unsupported in the registry.
+    # the indices tensor. reduction in {none, add, mul, max, min}.
     options = options!(attrs)
     axis = options["axis"] || 0
     reduction = options["reduction"] || "none"
@@ -2466,6 +2465,152 @@ defmodule AxonOnnx.Deserialize do
 
     updated_axon = Map.put(axon, output_name, layer)
     {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "Compress",
+           attribute: attrs,
+           input: [data_name, condition_name],
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # Compress: select elements where `condition` is truthy. Without
+    # `axis`, the input is flattened first and the result is 1-D. The
+    # condition is required as a constant; with fold_inputs it can come
+    # from a graph-input bound to test data.
+    axis = options!(attrs)["axis"]
+    data = input!(data_name, axon, params, used_params)
+    condition = constant!(condition_name, axon, params, used_params)
+
+    indices =
+      condition
+      |> Nx.to_flat_list()
+      |> Enum.with_index()
+      |> Enum.filter(fn {c, _} -> c != 0 end)
+      |> Enum.map(fn {_, i} -> i end)
+
+    fun = fn x, opts ->
+      idxs = Nx.tensor(opts[:indices], type: {:s, 64})
+      x_to_use = if opts[:axis] == nil, do: Nx.flatten(x), else: x
+      a = if opts[:axis] == nil, do: 0, else: opts[:axis]
+      Nx.take(x_to_use, idxs, axis: a)
+    end
+
+    apply_fun = fn t -> fun.(t, axis: axis, indices: indices) end
+
+    layer =
+      case get_axon_node(data) do
+        %Axon.Node{op: :constant, opts: [value: v]} ->
+          Axon.constant(apply_fun.(v), name: output_name)
+
+        %Nx.Tensor{} = t ->
+          Axon.constant(apply_fun.(t), name: output_name)
+
+        %Axon.Node{} ->
+          Axon.layer(fun, [data], name: output_name, op_name: :compress,
+            axis: axis, indices: indices)
+      end
+
+    {Map.put(axon, output_name, layer), params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "GatherND",
+           attribute: attrs,
+           input: [data_name, indices_name],
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # GatherND: indices is `[..., q]`, returns data elements at the
+    # addressed q-tuples. `batch_dims` (default 0) treats leading axes as
+    # batches that gather independently.
+    batch_dims = options!(attrs)["batch_dims"] || 0
+    data = input!(data_name, axon, params, used_params)
+    indices = input!(indices_name, axon, params, used_params)
+
+    fun = fn d, i, _opts ->
+      do_gather_nd(d, Nx.as_type(i, {:s, 64}), batch_dims)
+    end
+
+    layer = Axon.layer(fun, [data, indices], name: output_name, op_name: :gather_nd)
+    {Map.put(axon, output_name, layer), params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "Unique",
+           attribute: attrs,
+           input: [data_name],
+           output: outputs
+         },
+         {axon, params, used_params}
+       ) do
+    # Unique returns up to four tensors: values, indices into input,
+    # inverse mapping, counts. With an axis, dedupe along that axis;
+    # without, dedupe flat. `sorted=1` (default) sorts by value
+    # ascending.
+    opts = options!(attrs)
+    axis = opts["axis"]
+    sorted = (opts["sorted"] || 1) == 1
+
+    if axis do
+      raise ArgumentError, "Unique with axis attribute is not yet supported"
+    end
+
+    data = constant!(data_name, axon, params, used_params)
+    flat = Nx.to_flat_list(data)
+
+    {values, idx, inverse, counts} = unique_with_layouts(flat, sorted)
+    type = Nx.type(data)
+
+    materialised =
+      outputs
+      |> Enum.with_index()
+      |> Enum.map(fn {name, i} ->
+        tensor =
+          case i do
+            0 -> Nx.tensor(values, type: type)
+            1 -> Nx.tensor(idx, type: {:s, 64})
+            2 -> Nx.tensor(inverse, type: {:s, 64})
+            3 -> Nx.tensor(counts, type: {:s, 64})
+          end
+
+        {name, Axon.constant(tensor, name: name)}
+      end)
+
+    updated_axon =
+      Enum.reduce(materialised, axon, fn {name, layer}, acc -> Map.put(acc, name, layer) end)
+
+    {updated_axon, params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "ScatterND",
+           attribute: attrs,
+           input: [data_name, indices_name, updates_name],
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # ScatterND: indices is shape `[..., q]` where q <= rank(data); each
+    # row addresses a slice of data of shape `data.shape[q:]`. Reductions
+    # match ScatterElements: none/add/mul/max/min.
+    reduction = options!(attrs)["reduction"] || "none"
+    data = input!(data_name, axon, params, used_params)
+    indices = input!(indices_name, axon, params, used_params)
+    updates = input!(updates_name, axon, params, used_params)
+
+    fun = fn d, i, u, _opts -> do_scatter_nd(d, i, u, reduction) end
+
+    layer =
+      Axon.layer(fun, [data, indices, updates], name: output_name, op_name: :scatter_nd)
+
+    {Map.put(axon, output_name, layer), params, used_params}
   end
 
   defp recur_nodes(
@@ -3490,6 +3635,177 @@ defmodule AxonOnnx.Deserialize do
     {_init, predict} = Axon.build(axon)
     model_state = Axon.ModelState.new(params)
     predict.(model_state, %{}) |> Nx.backend_copy(Nx.BinaryBackend)
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "GroupNormalization",
+           attribute: attrs,
+           input: [x_name, scale_name, bias_name],
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # GroupNormalization: split the channel axis into `num_groups`, then
+    # normalise within each group (channels + spatial dims), then apply
+    # the per-channel scale and bias.
+    opts = options!(attrs)
+    num_groups = opts["num_groups"]
+    epsilon = opts["epsilon"] || 1.0e-5
+
+    if is_nil(num_groups) do
+      raise ArgumentError, "GroupNormalization requires the num_groups attribute"
+    end
+
+    x = input!(x_name, axon, params, used_params)
+    scale = input!(scale_name, axon, params, used_params)
+    bias = input!(bias_name, axon, params, used_params)
+
+    fun = fn x, scale, bias, opts ->
+      g = opts[:num_groups]
+      eps = opts[:epsilon]
+      shape = Nx.shape(x)
+      rank = tuple_size(shape)
+      n = elem(shape, 0)
+      c = elem(shape, 1)
+      spatial = Enum.map(2..(rank - 1)//1, &elem(shape, &1))
+      grouped_shape = List.to_tuple([n, g, div(c, g) | spatial])
+      reshaped = Nx.reshape(x, grouped_shape)
+      norm_axes = Enum.to_list(2..(tuple_size(grouped_shape) - 1)//1)
+
+      mean = Nx.mean(reshaped, axes: norm_axes, keep_axes: true)
+      var = Nx.variance(reshaped, axes: norm_axes, keep_axes: true)
+      normalised = Nx.divide(Nx.subtract(reshaped, mean), Nx.sqrt(Nx.add(var, eps)))
+      flattened = Nx.reshape(normalised, shape)
+
+      scale_shape = List.to_tuple([1, c | List.duplicate(1, rank - 2)])
+      scale_r = Nx.reshape(scale, scale_shape)
+      bias_r = Nx.reshape(bias, scale_shape)
+      Nx.add(Nx.multiply(flattened, scale_r), bias_r)
+    end
+
+    layer =
+      Axon.layer(fun, [x, scale, bias],
+        name: output_name,
+        op_name: :group_norm,
+        num_groups: num_groups,
+        epsilon: epsilon
+      )
+
+    {Map.put(axon, output_name, layer), params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{op_type: "Gelu", attribute: attrs, input: [input_name], output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    # Gelu: approximate="none" → x * Φ(x) (erf form); approximate="tanh"
+    # → tanh-based approximation. Axon.Activations.gelu uses the erf form.
+    approximate = options!(attrs)["approximate"] || "none"
+    input = input!(input_name, axon, params, used_params)
+
+    fun =
+      case approximate do
+        "none" ->
+          &Axon.Activations.gelu/1
+
+        "tanh" ->
+          fn x ->
+            # 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x^3)))
+            inner =
+              Nx.multiply(
+                Nx.sqrt(Nx.tensor(2.0 / :math.pi(), type: Nx.type(x))),
+                Nx.add(x, Nx.multiply(Nx.tensor(0.044715, type: Nx.type(x)), Nx.pow(x, 3)))
+              )
+
+            Nx.multiply(
+              Nx.multiply(Nx.tensor(0.5, type: Nx.type(x)), x),
+              Nx.add(Nx.tensor(1.0, type: Nx.type(x)), Nx.tanh(inner))
+            )
+          end
+
+        other ->
+          raise ArgumentError, "Gelu approximate=#{inspect(other)} is not supported"
+      end
+
+    output =
+      case get_axon_node(input) do
+        %Axon.Node{op: :constant, opts: [value: v]} ->
+          Axon.constant(fun.(v), name: output_name)
+
+        %Axon.Node{} ->
+          Axon.nx(input, fun, name: output_name, op_name: :gelu)
+
+        %Nx.Tensor{} = t ->
+          Axon.constant(fun.(t), name: output_name)
+      end
+
+    {Map.put(axon, output_name, output), params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{op_type: "Swish", attribute: attrs, input: [input_name], output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    # Swish: y = x * sigmoid(alpha * x). alpha default 1.0.
+    alpha = options!(attrs)["alpha"] || 1.0
+    input = input!(input_name, axon, params, used_params)
+
+    fun = fn x, opts ->
+      a = Nx.tensor(opts[:alpha], type: Nx.type(x))
+      Nx.multiply(x, Nx.sigmoid(Nx.multiply(a, x)))
+    end
+
+    apply_fun = &fun.(&1, alpha: alpha)
+
+    output =
+      case get_axon_node(input) do
+        %Axon.Node{op: :constant, opts: [value: v]} ->
+          Axon.constant(apply_fun.(v), name: output_name)
+
+        %Axon.Node{} ->
+          Axon.layer(fun, [input], name: output_name, op_name: :swish, alpha: alpha)
+
+        %Nx.Tensor{} = t ->
+          Axon.constant(apply_fun.(t), name: output_name)
+      end
+
+    {Map.put(axon, output_name, output), params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "ThresholdedRelu",
+           attribute: attrs,
+           input: [input_name],
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # ThresholdedRelu: y = x if x > alpha, else 0. alpha default 1.0.
+    alpha = options!(attrs)["alpha"] || 1.0
+    input = input!(input_name, axon, params, used_params)
+
+    fun = fn x, opts ->
+      a = Nx.tensor(opts[:alpha], type: Nx.type(x))
+      Nx.select(Nx.greater(x, a), x, Nx.tensor(0.0, type: Nx.type(x)))
+    end
+
+    apply_fun = &fun.(&1, alpha: alpha)
+
+    output =
+      case get_axon_node(input) do
+        %Axon.Node{op: :constant, opts: [value: v]} ->
+          Axon.constant(apply_fun.(v), name: output_name)
+
+        %Axon.Node{} ->
+          Axon.layer(fun, [input], name: output_name, op_name: :thresholded_relu, alpha: alpha)
+
+        %Nx.Tensor{} = t ->
+          Axon.constant(apply_fun.(t), name: output_name)
+      end
+
+    {Map.put(axon, output_name, output), params, used_params}
   end
 
   defp recur_nodes(
@@ -4938,6 +5254,187 @@ defmodule AxonOnnx.Deserialize do
   defp scatter_reduce_op("mul"), do: &Nx.multiply/2
   defp scatter_reduce_op("max"), do: &Nx.max/2
   defp scatter_reduce_op("min"), do: &Nx.min/2
+
+  # ScatterND: indices is `[..., q]`, each row addresses the first q axes
+  # of `data` and the corresponding update slice has the remaining shape.
+  # We flatten the leading "row" axes of indices/updates, expand each
+  # q-tuple into per-cell coordinates spanning the addressed slice, and
+  # dispatch to indexed_put / indexed_add / a sequential fold for the
+  # other reductions (which must compose duplicate indices correctly).
+  defp do_scatter_nd(data, indices, updates, reduction) do
+    indices = Nx.as_type(indices, {:s, 64})
+    rank = Nx.rank(data)
+    data_shape = Nx.shape(data)
+
+    indices_shape = Nx.shape(indices)
+    indices_rank = tuple_size(indices_shape)
+    q = elem(indices_shape, indices_rank - 1)
+    leading_dims = for i <- 0..(indices_rank - 2), do: elem(indices_shape, i)
+    num_rows = Enum.reduce(leading_dims, 1, &Kernel.*/2)
+
+    flat_indices = Nx.reshape(indices, {num_rows, q})
+
+    slice_dims = for i <- q..(rank - 1), do: elem(data_shape, i)
+    slice_size = Enum.reduce(slice_dims, 1, &Kernel.*/2)
+
+    # Build the inner-cell coordinate grid once; each "row" of indices
+    # broadcasts across this grid to produce slice_size full coordinates.
+    inner_coords =
+      case slice_dims do
+        [] ->
+          # q == rank: each row already addresses a scalar cell.
+          nil
+
+        _ ->
+          # Tensor of shape {slice_size, rank - q}: every coordinate of
+          # the addressed sub-slice, in row-major order.
+          coord_tensors =
+            for axis_within_slice <- 0..(length(slice_dims) - 1) do
+              Nx.iota(List.to_tuple(slice_dims), axis: axis_within_slice, type: {:s, 64})
+            end
+
+          coord_tensors
+          |> Nx.stack(axis: -1)
+          |> Nx.reshape({slice_size, length(slice_dims)})
+      end
+
+    # Expand each row of flat_indices to slice_size copies, then
+    # concatenate the inner coordinates.
+    full_coords =
+      case inner_coords do
+        nil ->
+          flat_indices
+
+        _ ->
+          # row_coords: {num_rows, slice_size, q}
+          row_coords =
+            flat_indices
+            |> Nx.new_axis(1)
+            |> Nx.broadcast({num_rows, slice_size, q})
+
+          # inner_broadcast: {num_rows, slice_size, rank - q}
+          inner_broadcast =
+            inner_coords
+            |> Nx.new_axis(0)
+            |> Nx.broadcast({num_rows, slice_size, length(slice_dims)})
+
+          Nx.concatenate([row_coords, inner_broadcast], axis: -1)
+          |> Nx.reshape({num_rows * slice_size, rank})
+      end
+
+    flat_updates = Nx.reshape(updates, {num_rows * slice_size})
+
+    case reduction do
+      "none" -> Nx.indexed_put(data, full_coords, flat_updates)
+      "add" -> Nx.indexed_add(data, full_coords, flat_updates)
+      reduction when reduction in ["mul", "max", "min"] ->
+        # Sequential fold so duplicate indices compose per spec.
+        reduce_op = scatter_reduce_op(reduction)
+        n = num_rows * slice_size
+
+        Enum.reduce(0..(n - 1), data, fn i, acc ->
+          coord_row = Nx.slice_along_axis(full_coords, i, 1, axis: 0)
+          update_scalar =
+            flat_updates |> Nx.slice_along_axis(i, 1, axis: 0) |> Nx.reshape({1})
+
+          current = Nx.gather(acc, coord_row) |> Nx.reshape({1})
+          new_val = reduce_op.(current, update_scalar)
+          Nx.indexed_put(acc, coord_row, new_val)
+        end)
+    end
+  end
+
+  # GatherND: index into the first `q = last_dim(indices)` axes of data
+  # (after stripping `batch_dims` leading axes). The result shape is
+  # `indices.shape[:-1] ++ data.shape[batch_dims + q:]`.
+  defp do_gather_nd(data, indices, batch_dims) do
+    data_shape = Nx.shape(data)
+    indices_shape = Nx.shape(indices)
+    indices_rank = tuple_size(indices_shape)
+    q = elem(indices_shape, indices_rank - 1)
+    data_rank = tuple_size(data_shape)
+    addressed_rank = batch_dims + q
+
+    if batch_dims == 0 do
+      # Flatten leading dims of indices to a {N, q} list, then gather
+      # each row as a slice of data.
+      leading = Tuple.to_list(indices_shape) |> Enum.drop(-1)
+      n = Enum.reduce(leading, 1, &Kernel.*/2)
+      flat_idx = Nx.reshape(indices, {n, q})
+
+      slice_dims = for i <- addressed_rank..(data_rank - 1)//1, do: elem(data_shape, i)
+      slice_size = Enum.reduce(slice_dims, 1, &Kernel.*/2)
+
+      flat_rows =
+        Enum.reduce(0..(addressed_rank - 1)//1, 1, fn i, acc -> acc * elem(data_shape, i) end)
+
+      flat_data = Nx.reshape(data, {flat_rows, slice_size})
+
+      # Convert each q-tuple to a flat row-index by computing per-axis
+      # strides in row-major order.
+      strides =
+        for i <- 0..(q - 1)//1 do
+          Enum.reduce((i + 1)..(addressed_rank - 1)//1, 1, fn j, acc ->
+            acc * elem(data_shape, j)
+          end)
+        end
+
+      strides_t = Nx.tensor(strides, type: {:s, 64})
+
+      flat_indices = Nx.dot(flat_idx, strides_t)
+
+      gathered = Nx.take(flat_data, flat_indices, axis: 0)
+
+      out_shape = List.to_tuple(leading ++ slice_dims)
+      Nx.reshape(gathered, out_shape)
+    else
+      # With batch_dims, we gather per-batch. The corpus only exercises
+      # batch_dims=0; raise a clear error if encountered for now.
+      raise ArgumentError, "GatherND with batch_dims=#{batch_dims} is not yet supported"
+    end
+  end
+
+  defp unique_with_layouts(flat, sorted) do
+    # `flat` is the input in flattened first-occurrence order. We need:
+    # * `values`: the unique values (optionally sorted)
+    # * `indices`: positions of each unique value in the original input
+    #   (first occurrence)
+    # * `inverse`: for each original position, the index of its value in
+    #   `values`
+    # * `counts`: how many times each unique value appears
+    indexed = Enum.with_index(flat)
+
+    {first_occurrences, _seen} =
+      Enum.reduce(indexed, {[], MapSet.new()}, fn {v, i}, {acc, seen} ->
+        if MapSet.member?(seen, v) do
+          {acc, seen}
+        else
+          {[{v, i} | acc], MapSet.put(seen, v)}
+        end
+      end)
+
+    first_occurrences = Enum.reverse(first_occurrences)
+
+    ordered =
+      if sorted do
+        Enum.sort_by(first_occurrences, fn {v, _i} -> v end)
+      else
+        first_occurrences
+      end
+
+    values = Enum.map(ordered, fn {v, _i} -> v end)
+    idx = Enum.map(ordered, fn {_v, i} -> i end)
+
+    value_to_position =
+      ordered
+      |> Enum.with_index()
+      |> Map.new(fn {{v, _i}, pos} -> {v, pos} end)
+
+    inverse = Enum.map(flat, fn v -> Map.fetch!(value_to_position, v) end)
+    counts = Enum.map(values, fn v -> Enum.count(flat, &(&1 == v)) end)
+
+    {values, idx, inverse, counts}
+  end
 
   defp do_layer_norm(x, scale, bias, axis, epsilon) do
     {y, _mean, _inv_std} = layer_norm_parts(x, axis, epsilon)
