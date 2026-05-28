@@ -7,24 +7,24 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 1272 | 70.9% |
-| unsupported | 518 | 28.9% |
+| passing | 1293 | 72.1% |
+| unsupported | 497 | 27.7% |
 | known_bug | 3 | 0.2% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 ## Round-trip coverage
 
-Of the 1272 cases that import cleanly, how many also export back to
+Of the 1293 cases that import cleanly, how many also export back to
 ONNX and re-import with matching predictions (the full bidirectional
 Nx/Axon ⇄ ONNX path).
 
 | Classification | Count | % of import-passing |
 |---|---|---|
-| passing | 544 | 42.8% |
-| unsupported | 727 | 57.2% |
+| passing | 545 | 42.2% |
+| unsupported | 748 | 57.8% |
 | known_bug | 0 | 0.0% |
-| newly_passing | 1 | 0.1% |
+| newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 
@@ -32,8 +32,8 @@ Nx/Axon ⇄ ONNX path).
 
 **node** — 1653 cases
 
-- passing: 1162
-- unsupported: 488
+- passing: 1183
+- unsupported: 467
 - known_bug: 3
 
 **pytorch-converted** — 82 cases
@@ -73,7 +73,7 @@ A case using N distinct ops contributes to N rows.
 | Asinh | 2 | 2 | 0 | 0 | 0 | 0 |
 | Atan | 2 | 2 | 0 | 0 | 0 | 0 |
 | Atanh | 2 | 2 | 0 | 0 | 0 | 0 |
-| Attention | 62 | 38 | 24 | 0 | 0 | 0 |
+| Attention | 62 | 58 | 4 | 0 | 0 | 0 |
 | AveragePool | 27 | 26 | 1 | 0 | 0 | 0 |
 | BatchNormalization | 9 | 5 | 4 | 0 | 0 | 0 |
 | Bernoulli | 3 | 0 | 3 | 0 | 0 | 0 |
@@ -253,7 +253,7 @@ A case using N distinct ops contributes to N rows.
 | TreeEnsemble | 2 | 0 | 2 | 0 | 0 | 0 |
 | Trilu | 18 | 16 | 2 | 0 | 0 | 0 |
 | Unique | 6 | 3 | 3 | 0 | 0 | 0 |
-| Unsqueeze | 101 | 90 | 11 | 0 | 0 | 0 |
+| Unsqueeze | 101 | 91 | 10 | 0 | 0 | 0 |
 | Upsample | 1 | 0 | 1 | 0 | 0 | 0 |
 | Where | 97 | 96 | 1 | 0 | 0 | 0 |
 | Xor | 8 | 8 | 0 | 0 | 0 | 0 |
