@@ -7,22 +7,22 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 1071 | 59.7% |
-| unsupported | 719 | 40.1% |
+| passing | 1114 | 62.1% |
+| unsupported | 676 | 37.7% |
 | known_bug | 3 | 0.2% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 ## Round-trip coverage
 
-Of the 1071 cases that import cleanly, how many also export back to
+Of the 1114 cases that import cleanly, how many also export back to
 ONNX and re-import with matching predictions (the full bidirectional
 Nx/Axon ⇄ ONNX path).
 
 | Classification | Count | % of import-passing |
 |---|---|---|
-| passing | 543 | 50.7% |
-| unsupported | 528 | 49.3% |
+| passing | 544 | 48.8% |
+| unsupported | 570 | 51.2% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -32,8 +32,8 @@ Nx/Axon ⇄ ONNX path).
 
 **node** — 1653 cases
 
-- passing: 961
-- unsupported: 689
+- passing: 1004
+- unsupported: 646
 - known_bug: 3
 
 **pytorch-converted** — 82 cases
@@ -88,10 +88,10 @@ A case using N distinct ops contributes to N rows.
 | CastLike | 108 | 45 | 63 | 0 | 0 | 0 |
 | Ceil | 4 | 2 | 2 | 0 | 0 | 0 |
 | Celu | 1 | 1 | 0 | 0 | 0 | 0 |
-| CenterCropPad | 6 | 0 | 6 | 0 | 0 | 0 |
+| CenterCropPad | 6 | 6 | 0 | 0 | 0 | 0 |
 | Clip | 16 | 10 | 6 | 0 | 0 | 0 |
 | Col2Im | 5 | 0 | 5 | 0 | 0 | 0 |
-| Compress | 4 | 0 | 4 | 0 | 0 | 0 |
+| Compress | 4 | 4 | 0 | 0 | 0 | 0 |
 | Concat | 133 | 66 | 67 | 0 | 0 | 0 |
 | ConcatFromSequence | 2 | 0 | 2 | 0 | 0 | 0 |
 | Constant | 274 | 161 | 113 | 0 | 0 | 0 |
@@ -104,7 +104,7 @@ A case using N distinct ops contributes to N rows.
 | CumSum | 9 | 9 | 0 | 0 | 0 | 0 |
 | DFT | 6 | 0 | 6 | 0 | 0 | 0 |
 | DeformConv | 4 | 0 | 4 | 0 | 0 | 0 |
-| DepthToSpace | 2 | 0 | 2 | 0 | 0 | 0 |
+| DepthToSpace | 2 | 2 | 0 | 0 | 0 | 0 |
 | DequantizeLinear | 14 | 4 | 10 | 0 | 0 | 0 |
 | Det | 2 | 0 | 2 | 0 | 0 | 0 |
 | Div | 184 | 113 | 71 | 0 | 0 | 0 |
@@ -122,8 +122,8 @@ A case using N distinct ops contributes to N rows.
 | GRU | 4 | 0 | 4 | 0 | 0 | 0 |
 | Gather | 33 | 20 | 13 | 0 | 0 | 0 |
 | GatherElements | 21 | 21 | 0 | 0 | 0 | 0 |
-| GatherND | 3 | 0 | 3 | 0 | 0 | 0 |
-| Gelu | 4 | 0 | 4 | 0 | 0 | 0 |
+| GatherND | 3 | 2 | 1 | 0 | 0 | 0 |
+| Gelu | 4 | 4 | 0 | 0 | 0 | 0 |
 | Gemm | 14 | 14 | 0 | 0 | 0 | 0 |
 | GlobalAveragePool | 2 | 2 | 0 | 0 | 0 | 0 |
 | GlobalMaxPool | 2 | 2 | 0 | 0 | 0 | 0 |
@@ -131,7 +131,7 @@ A case using N distinct ops contributes to N rows.
 | Greater | 19 | 16 | 3 | 0 | 0 | 0 |
 | GreaterOrEqual | 8 | 8 | 0 | 0 | 0 | 0 |
 | GridSample | 18 | 0 | 18 | 0 | 0 | 0 |
-| GroupNormalization | 2 | 0 | 2 | 0 | 0 | 0 |
+| GroupNormalization | 2 | 2 | 0 | 0 | 0 | 0 |
 | HammingWindow | 2 | 0 | 2 | 0 | 0 | 0 |
 | HannWindow | 2 | 0 | 2 | 0 | 0 | 0 |
 | HardSigmoid | 4 | 4 | 0 | 0 | 0 | 0 |
@@ -140,7 +140,7 @@ A case using N distinct ops contributes to N rows.
 | Identity | 102 | 40 | 62 | 0 | 0 | 0 |
 | If | 7 | 1 | 6 | 0 | 0 | 0 |
 | ImageDecoder | 9 | 0 | 9 | 0 | 0 | 0 |
-| InstanceNormalization | 3 | 0 | 3 | 0 | 0 | 0 |
+| InstanceNormalization | 3 | 2 | 1 | 0 | 0 | 0 |
 | IsInf | 4 | 4 | 0 | 0 | 0 | 0 |
 | IsNaN | 2 | 2 | 0 | 0 | 0 | 0 |
 | LRN | 2 | 2 | 0 | 0 | 0 | 0 |
@@ -158,13 +158,13 @@ A case using N distinct ops contributes to N rows.
 | MatMul | 74 | 29 | 45 | 0 | 0 | 0 |
 | MatMulInteger | 1 | 1 | 0 | 0 | 0 | 0 |
 | Max | 28 | 22 | 6 | 0 | 0 | 0 |
-| MaxPool | 28 | 22 | 6 | 0 | 0 | 0 |
-| MaxUnpool | 2 | 0 | 2 | 0 | 0 | 0 |
+| MaxPool | 28 | 25 | 3 | 0 | 0 | 0 |
+| MaxUnpool | 2 | 1 | 1 | 0 | 0 | 0 |
 | Mean | 3 | 3 | 0 | 0 | 0 | 0 |
 | MeanVarianceNormalization | 1 | 0 | 1 | 0 | 0 | 0 |
 | MelWeightMatrix | 1 | 0 | 1 | 0 | 0 | 0 |
 | Min | 21 | 21 | 0 | 0 | 0 | 0 |
-| Mish | 1 | 0 | 1 | 0 | 0 | 0 |
+| Mish | 1 | 1 | 0 | 0 | 0 | 0 |
 | Mod | 75 | 37 | 38 | 0 | 0 | 0 |
 | Momentum | 3 | 0 | 3 | 0 | 0 | 0 |
 | Mul | 207 | 137 | 70 | 0 | 0 | 0 |
@@ -202,7 +202,7 @@ A case using N distinct ops contributes to N rows.
 | Relu | 5 | 3 | 2 | 0 | 0 | 0 |
 | Reshape | 160 | 64 | 96 | 0 | 0 | 0 |
 | Resize | 39 | 0 | 39 | 0 | 0 | 0 |
-| ReverseSequence | 2 | 0 | 2 | 0 | 0 | 0 |
+| ReverseSequence | 2 | 2 | 0 | 0 | 0 | 0 |
 | RoiAlign | 3 | 0 | 3 | 0 | 0 | 0 |
 | RotaryEmbedding | 8 | 0 | 8 | 0 | 0 | 0 |
 | Round | 4 | 4 | 0 | 0 | 0 | 0 |
@@ -210,7 +210,7 @@ A case using N distinct ops contributes to N rows.
 | Scan | 2 | 0 | 2 | 0 | 0 | 0 |
 | Scatter | 2 | 0 | 2 | 0 | 0 | 0 |
 | ScatterElements | 6 | 6 | 0 | 0 | 0 | 0 |
-| ScatterND | 5 | 0 | 5 | 0 | 0 | 0 |
+| ScatterND | 5 | 5 | 0 | 0 | 0 | 0 |
 | Selu | 5 | 5 | 0 | 0 | 0 | 0 |
 | SequenceAt | 4 | 0 | 4 | 0 | 0 | 0 |
 | SequenceConstruct | 4 | 0 | 4 | 0 | 0 | 0 |
@@ -231,7 +231,7 @@ A case using N distinct ops contributes to N rows.
 | SoftmaxCrossEntropyLoss | 34 | 34 | 0 | 0 | 0 | 0 |
 | Softplus | 4 | 4 | 0 | 0 | 0 | 0 |
 | Softsign | 2 | 2 | 0 | 0 | 0 | 0 |
-| SpaceToDepth | 2 | 0 | 2 | 0 | 0 | 0 |
+| SpaceToDepth | 2 | 2 | 0 | 0 | 0 | 0 |
 | Split | 27 | 20 | 7 | 0 | 0 | 0 |
 | SplitToSequence | 6 | 0 | 6 | 0 | 0 | 0 |
 | Sqrt | 139 | 86 | 53 | 0 | 0 | 0 |
@@ -241,18 +241,18 @@ A case using N distinct ops contributes to N rows.
 | StringSplit | 6 | 0 | 6 | 0 | 0 | 0 |
 | Sub | 121 | 87 | 34 | 0 | 0 | 0 |
 | Sum | 8 | 8 | 0 | 0 | 0 | 0 |
-| Swish | 1 | 0 | 1 | 0 | 0 | 0 |
+| Swish | 1 | 1 | 0 | 0 | 0 | 0 |
 | Tan | 2 | 2 | 0 | 0 | 0 | 0 |
 | Tanh | 16 | 9 | 7 | 0 | 0 | 0 |
 | TensorScatter | 3 | 0 | 3 | 0 | 0 | 0 |
 | TfIdfVectorizer | 7 | 0 | 7 | 0 | 0 | 0 |
-| ThresholdedRelu | 3 | 0 | 3 | 0 | 0 | 0 |
+| ThresholdedRelu | 3 | 3 | 0 | 0 | 0 | 0 |
 | Tile | 4 | 4 | 0 | 0 | 0 | 0 |
 | TopK | 7 | 7 | 0 | 0 | 0 | 0 |
 | Transpose | 117 | 37 | 80 | 0 | 0 | 0 |
 | TreeEnsemble | 2 | 0 | 2 | 0 | 0 | 0 |
 | Trilu | 18 | 16 | 2 | 0 | 0 | 0 |
-| Unique | 6 | 0 | 6 | 0 | 0 | 0 |
+| Unique | 6 | 3 | 3 | 0 | 0 | 0 |
 | Unsqueeze | 101 | 53 | 48 | 0 | 0 | 0 |
 | Upsample | 1 | 0 | 1 | 0 | 0 | 0 |
 | Where | 97 | 59 | 38 | 0 | 0 | 0 |

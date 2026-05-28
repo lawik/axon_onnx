@@ -637,6 +637,144 @@ defmodule AxonOnnx.Deserialize do
 
   defp expand_to_spatial(value, _spatial_rank) when is_list(value), do: value
 
+  # Resize helpers — coordinate transformation (output i → input float)
+  # and nearest-mode rounding. The corpus exercises five
+  # coordinate_transformation_modes; "tf_crop_and_resize" is rejected
+  # earlier with a clean error.
+  defp resize_coord_transform(out_i, in_dim, out_dim, scale, ctm) do
+    case ctm do
+      "half_pixel" ->
+        (out_i + 0.5) / scale - 0.5
+
+      "half_pixel_symmetric" ->
+        adj = in_dim / 2 - out_dim / 2 / scale
+        (out_i + 0.5) / scale - 0.5 + adj
+
+      "pytorch_half_pixel" ->
+        if out_dim > 1, do: (out_i + 0.5) / scale - 0.5, else: 0.0
+
+      "asymmetric" ->
+        out_i / scale
+
+      "align_corners" ->
+        if out_dim == 1, do: 0.0, else: out_i * (in_dim - 1) / (out_dim - 1)
+
+      other ->
+        raise ArgumentError, "Resize coord transform #{inspect(other)} not supported"
+    end
+  end
+
+  defp resize_nearest_round(x, "round_prefer_floor") do
+    # Round half toward negative infinity.
+    floor_x = :math.floor(x) |> trunc()
+    frac = x - floor_x
+    cond do
+      frac > 0.5 -> floor_x + 1
+      frac < 0.5 -> floor_x
+      true -> floor_x
+    end
+  end
+
+  defp resize_nearest_round(x, "round_prefer_ceil") do
+    floor_x = :math.floor(x) |> trunc()
+    frac = x - floor_x
+    cond do
+      frac > 0.5 -> floor_x + 1
+      frac < 0.5 -> floor_x
+      true -> floor_x + 1
+    end
+  end
+
+  defp resize_nearest_round(x, "floor"), do: :math.floor(x) |> trunc()
+  defp resize_nearest_round(x, "ceil"), do: :math.ceil(x) |> trunc()
+
+  defp resize_apply_sizes(_zip, _input_shape, axes, "stretch") do
+    # `_zip` is the {axis, target_size} list — but the safe shape is just
+    # the per-axis target list, with non-resized axes preserved.
+    Enum.map(0..(length(_input_shape) - 1)//1, fn ax ->
+      case Enum.find_index(axes, &(&1 == ax)) do
+        nil -> Enum.at(_input_shape, ax)
+        idx -> _zip |> Enum.at(idx) |> elem(1)
+      end
+    end)
+  end
+
+  defp resize_apply_sizes(zip, input_shape, axes, policy)
+       when policy in ["not_larger", "not_smaller"] do
+    # Pick a single scale that keeps the aspect ratio: smallest scale
+    # so no dim exceeds target ("not_larger" → round down so result
+    # ≤ scaled input), or largest so no dim falls below target
+    # ("not_smaller" → round up so result ≥ scaled input). All resized
+    # axes get that scale; un-resized axes keep their input size.
+    scales =
+      Enum.map(zip, fn {ax, target} ->
+        in_dim = Enum.at(input_shape, ax)
+        target / in_dim
+      end)
+
+    {chosen_scale, rounder} =
+      case policy do
+        "not_larger" -> {Enum.min(scales), &Float.floor/1}
+        "not_smaller" -> {Enum.max(scales), &Float.ceil/1}
+      end
+
+    Enum.map(0..(length(input_shape) - 1)//1, fn ax ->
+      if ax in axes,
+        do: (Enum.at(input_shape, ax) * chosen_scale) |> rounder.() |> trunc(),
+        else: Enum.at(input_shape, ax)
+    end)
+  end
+
+  # Bilinear interpolation along each resized axis: for output index i,
+  # compute the floating input coordinate, then interpolate between the
+  # two adjacent integer positions with weights (1 - frac) and frac.
+  # Implemented as a sequence of per-axis Nx.gather operations followed
+  # by weighted Nx.add — gives ONNX bilinear (and N-D linear) by
+  # composing 1-D interpolation along each resized axis independently.
+  defp resize_linear_apply(x, input_shape, out_shape, per_axis_scales, ctm) do
+    rank = length(input_shape)
+
+    Enum.reduce(0..(rank - 1)//1, x, fn ax, acc ->
+      in_dim = Enum.at(input_shape, ax)
+      out_dim = Enum.at(out_shape, ax)
+      s = Enum.at(per_axis_scales, ax)
+
+      if out_dim == in_dim and s == 1.0 do
+        acc
+      else
+        # Build {out_dim} arrays of {lo, hi, weight}
+        coords =
+          for out_i <- 0..(out_dim - 1) do
+            in_f = resize_coord_transform(out_i, in_dim, out_dim, s, ctm)
+            in_f_c = in_f |> max(0.0) |> min(in_dim - 1.0)
+            lo = in_f_c |> :math.floor() |> trunc()
+            hi = min(lo + 1, in_dim - 1)
+            frac = in_f_c - lo
+            {lo, hi, frac}
+          end
+
+        lo_idx = Enum.map(coords, fn {l, _, _} -> l end)
+        hi_idx = Enum.map(coords, fn {_, h, _} -> h end)
+        weights = Enum.map(coords, fn {_, _, f} -> f end)
+
+        lo_t = Nx.take(acc, Nx.tensor(lo_idx, type: {:s, 64}), axis: ax)
+        hi_t = Nx.take(acc, Nx.tensor(hi_idx, type: {:s, 64}), axis: ax)
+
+        w_shape =
+          List.to_tuple(
+            for i <- 0..(rank - 1)//1, do: if(i == ax, do: out_dim, else: 1)
+          )
+
+        w =
+          Nx.tensor(weights, type: Nx.type(acc))
+          |> Nx.reshape(w_shape)
+
+        Nx.add(Nx.multiply(lo_t, Nx.subtract(Nx.tensor(1.0, type: Nx.type(acc)), w)),
+               Nx.multiply(hi_t, w))
+      end
+    end)
+  end
+
   # Returns the permutation that swaps axes `a` and `b` in a tensor of
   # rank `rank`. e.g. `swap_axes(4, 0, 1)` is `[1, 0, 2, 3]`.
   defp swap_axes(rank, a, b) do
@@ -2770,6 +2908,187 @@ defmodule AxonOnnx.Deserialize do
         target_shape: target_shape,
         axes: axes_attr
       )
+
+    {Map.put(axon, output_name, layer), params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{op_type: "Resize", attribute: attrs, input: inputs, output: [output_name]},
+         {axon, params, used_params}
+       ) do
+    # Resize: spatial-axis upsample/downsample. We support the modes
+    # exercised by the corpus's nearest and linear tests:
+    #   * mode: "nearest" (default) and "linear"
+    #   * coordinate_transformation_mode: half_pixel (default),
+    #     asymmetric, align_corners, pytorch_half_pixel,
+    #     half_pixel_symmetric
+    #   * nearest_mode: round_prefer_floor (default), round_prefer_ceil,
+    #     floor, ceil
+    #
+    # roi/extrapolation/antialias/cubic stay unsupported and raise so
+    # those test cases surface clean errors and remain :unsupported.
+    opts = options!(attrs)
+    mode = opts["mode"] || "nearest"
+    ctm = opts["coordinate_transformation_mode"] || "half_pixel"
+    nearest_mode = opts["nearest_mode"] || "round_prefer_floor"
+    keep_aspect = opts["keep_aspect_ratio_policy"] || "stretch"
+    axes_attr = opts["axes"]
+    antialias = opts["antialias"] || 0
+    exclude_outside = opts["exclude_outside"] || 0
+
+    if antialias == 1 do
+      raise ArgumentError, "Resize antialias=1 is not yet supported"
+    end
+
+    if exclude_outside == 1 do
+      raise ArgumentError, "Resize exclude_outside=1 is not yet supported"
+    end
+
+    if mode not in ["nearest", "linear"] do
+      raise ArgumentError, "Resize mode=#{inspect(mode)} is not yet supported"
+    end
+
+    if ctm in ["tf_crop_and_resize"] do
+      raise ArgumentError, "Resize tf_crop_and_resize is not yet supported"
+    end
+
+    {x_name, scales_name, sizes_name} =
+      case inputs do
+        [x] ->
+          {x, nil, nil}
+
+        [x, _roi] ->
+          {x, nil, nil}
+
+        [x, _roi, scales] ->
+          {x, (scales != "" && scales) || nil, nil}
+
+        [x, _roi, scales, sizes] ->
+          {x, (scales != "" && scales) || nil, (sizes != "" && sizes) || nil}
+      end
+
+    x = input!(x_name, axon, params, used_params)
+
+    scales =
+      if scales_name do
+        constant!(scales_name, axon, params, used_params) |> Nx.to_flat_list()
+      end
+
+    sizes =
+      if sizes_name do
+        constant!(sizes_name, axon, params, used_params) |> Nx.to_flat_list()
+      end
+
+    input_shape = kernel_shape_from_axon!(x) |> Tuple.to_list()
+    rank = length(input_shape)
+
+    axes =
+      cond do
+        is_nil(axes_attr) -> Enum.to_list(0..(rank - 1)//1)
+        true -> Enum.map(axes_attr, fn a -> if a < 0, do: a + rank, else: a end)
+      end
+
+    {out_shape, per_axis_scales} =
+      cond do
+        sizes ->
+          sizes_for_axes =
+            cond do
+              is_nil(axes_attr) -> sizes
+              true -> sizes
+            end
+
+          new_dims =
+            Enum.zip(axes, sizes_for_axes)
+            |> resize_apply_sizes(input_shape, axes, keep_aspect)
+
+          scales_list =
+            Enum.map(0..(rank - 1)//1, fn ax ->
+              new = Enum.at(new_dims, ax)
+              old = Enum.at(input_shape, ax)
+              new / old
+            end)
+
+          {new_dims, scales_list}
+
+        scales ->
+          scales_for_axes = scales
+
+          new_dims =
+            Enum.map(0..(rank - 1)//1, fn ax ->
+              case Enum.find_index(axes, &(&1 == ax)) do
+                nil ->
+                  Enum.at(input_shape, ax)
+
+                idx ->
+                  s = Enum.at(scales_for_axes, idx)
+                  trunc(Enum.at(input_shape, ax) * s)
+              end
+            end)
+
+          full_scales =
+            Enum.map(0..(rank - 1)//1, fn ax ->
+              case Enum.find_index(axes, &(&1 == ax)) do
+                nil -> 1.0
+                idx -> Enum.at(scales_for_axes, idx)
+              end
+            end)
+
+          {new_dims, full_scales}
+
+        true ->
+          raise ArgumentError, "Resize requires either scales or sizes"
+      end
+
+    # Pre-compute per-axis index arrays mapping each output position to
+    # a (clamped) input position. This is independent of x's runtime
+    # data so we can do it at build time.
+    nearest_indices =
+      if mode == "nearest" do
+        Enum.map(0..(rank - 1)//1, fn ax ->
+          in_dim = Enum.at(input_shape, ax)
+          out_dim = Enum.at(out_shape, ax)
+          s = Enum.at(per_axis_scales, ax)
+
+          for out_i <- 0..(out_dim - 1) do
+            in_f = resize_coord_transform(out_i, in_dim, out_dim, s, ctm)
+            in_i = resize_nearest_round(in_f, nearest_mode)
+            in_i |> max(0) |> min(in_dim - 1)
+          end
+        end)
+      end
+
+    layer_fun =
+      case mode do
+        "nearest" ->
+          fn x, _opts ->
+            Enum.with_index(nearest_indices)
+            |> Enum.reduce(x, fn {idxs, ax}, acc ->
+              if idxs == Enum.to_list(0..(Enum.at(input_shape, ax) - 1)//1) and
+                   length(idxs) == Enum.at(out_shape, ax) do
+                acc
+              else
+                Nx.take(acc, Nx.tensor(idxs, type: {:s, 64}), axis: ax)
+              end
+            end)
+          end
+
+        "linear" ->
+          fn x, _opts ->
+            resize_linear_apply(x, input_shape, out_shape, per_axis_scales, ctm)
+          end
+      end
+
+    layer =
+      case get_axon_node(x) do
+        %Axon.Node{op: :constant, opts: [value: v]} ->
+          Axon.constant(layer_fun.(v, []), name: output_name)
+
+        %Axon.Node{} ->
+          Axon.layer(layer_fun, [x], name: output_name, op_name: :resize)
+
+        %Nx.Tensor{} = t ->
+          Axon.constant(layer_fun.(t, []), name: output_name)
+      end
 
     {Map.put(axon, output_name, layer), params, used_params}
   end
