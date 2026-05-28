@@ -637,6 +637,120 @@ defmodule AxonOnnx.Deserialize do
 
   defp expand_to_spatial(value, _spatial_rank) when is_list(value), do: value
 
+  # ----- RotaryEmbedding --------------------------------------------------
+
+  # Applies rotary embedding to `input` along the head dimension. The
+  # 4-D case treats `input` as {batch, num_heads, seq_len, head_size};
+  # the 3-D case as {batch, seq_len, num_heads * head_size}.
+  defp do_rotary_embedding(x, cos_cache, sin_cache, position_ids, opts) do
+    interleaved = opts[:interleaved]
+    rotary_dim = opts[:rotary_dim]
+    num_heads_opt = opts[:num_heads]
+    rank = Nx.rank(x)
+
+    # Reshape 3-D form to 4-D for uniform processing, then reshape back
+    # at the end.
+    {x_4d, original_3d} =
+      cond do
+        rank == 4 ->
+          {x, false}
+
+        rank == 3 ->
+          {batch, seq, hidden} = Nx.shape(x)
+          nh = if num_heads_opt > 0, do: num_heads_opt, else: raise(ArgumentError, "RotaryEmbedding 3-D form needs num_heads attribute")
+          hs = div(hidden, nh)
+          # ONNX 3-D layout is (batch, seq, num_heads * head_size); the
+          # 4-D internal layout is (batch, num_heads, seq, head_size).
+          {Nx.reshape(x, {batch, seq, nh, hs}) |> Nx.transpose(axes: [0, 2, 1, 3]), true}
+      end
+
+    {_batch, _nh, _seq, head_size} = Nx.shape(x_4d)
+    effective_rotary = if rotary_dim == 0, do: head_size, else: rotary_dim
+
+    # Look up cos/sin for each position; result shape {batch, seq, rotary/2}.
+    cos =
+      case position_ids do
+        nil ->
+          # No position_ids: use cos_cache as-is. Assume it's already in
+          # {batch, seq, rotary/2} or compatible-broadcast form.
+          cos_cache
+
+        _ ->
+          pos = Nx.as_type(position_ids, {:s, 64})
+          Nx.take(cos_cache, pos, axis: 0)
+      end
+
+    sin =
+      case position_ids do
+        nil -> sin_cache
+        _ -> Nx.take(sin_cache, Nx.as_type(position_ids, {:s, 64}), axis: 0)
+      end
+
+    # Broadcast cos/sin to {batch, 1, seq, rotary/2} so they apply to
+    # all heads.
+    cos_b = Nx.new_axis(cos, 1)
+    sin_b = Nx.new_axis(sin, 1)
+
+    # Split the head into the rotated part (first `effective_rotary`
+    # entries) and the passthrough part (rest).
+    rotated = Nx.slice_along_axis(x_4d, 0, effective_rotary, axis: 3)
+
+    passthrough =
+      if effective_rotary < head_size do
+        Nx.slice_along_axis(x_4d, effective_rotary, head_size - effective_rotary, axis: 3)
+      end
+
+    # Split the rotated half into (x1, x2). For interleaved=0 (default),
+    # x1 is the first half and x2 is the second half. For interleaved=1
+    # the (even, odd) entries are paired.
+    half = div(effective_rotary, 2)
+
+    {x1, x2} =
+      if interleaved do
+        # Pull even-indexed and odd-indexed entries.
+        indices_even = Nx.tensor(Enum.map(0..(half - 1), &(&1 * 2)), type: {:s, 64})
+        indices_odd = Nx.tensor(Enum.map(0..(half - 1), &(&1 * 2 + 1)), type: {:s, 64})
+        {Nx.take(rotated, indices_even, axis: 3), Nx.take(rotated, indices_odd, axis: 3)}
+      else
+        {Nx.slice_along_axis(rotated, 0, half, axis: 3),
+         Nx.slice_along_axis(rotated, half, half, axis: 3)}
+      end
+
+    new_x1 = Nx.subtract(Nx.multiply(x1, cos_b), Nx.multiply(x2, sin_b))
+    new_x2 = Nx.add(Nx.multiply(x1, sin_b), Nx.multiply(x2, cos_b))
+
+    rotated_out =
+      if interleaved do
+        # Interleave new_x1 and new_x2 back into pairs along the head axis.
+        stacked = Nx.stack([new_x1, new_x2], axis: 4)
+        new_shape =
+          stacked
+          |> Nx.shape()
+          |> Tuple.to_list()
+          |> List.delete_at(-1)
+          |> List.update_at(-1, &(&1 * 2))
+          |> List.to_tuple()
+
+        Nx.reshape(stacked, new_shape)
+      else
+        Nx.concatenate([new_x1, new_x2], axis: 3)
+      end
+
+    final =
+      if passthrough do
+        Nx.concatenate([rotated_out, passthrough], axis: 3)
+      else
+        rotated_out
+      end
+
+    if original_3d do
+      {batch, nh, seq, hs} = Nx.shape(final)
+      final |> Nx.transpose(axes: [0, 2, 1, 3]) |> Nx.reshape({batch, seq, nh * hs})
+    else
+      final
+    end
+  end
+
   # ----- Einsum -----------------------------------------------------------
 
   # Single-input einsum: handles reductions, transposes, and diagonals.
@@ -3167,6 +3281,70 @@ defmodule AxonOnnx.Deserialize do
         %Nx.Tensor{} = t ->
           Axon.constant(fun.(t, []), name: output_name)
       end
+
+    {Map.put(axon, output_name, layer), params, used_params}
+  end
+
+  defp recur_nodes(
+         %Node{
+           op_type: "RotaryEmbedding",
+           attribute: attrs,
+           input: inputs,
+           output: [output_name]
+         },
+         {axon, params, used_params}
+       ) do
+    # RotaryEmbedding: rotate (x1, x2) pairs along the head axis using
+    # per-position cos/sin caches. Inputs:
+    #   * input: {batch, num_heads, seq_len, head_size}  (4D)
+    #     or       {batch, seq_len, num_heads * head_size} (3D)
+    #   * cos_cache, sin_cache: {max_seq_len, rotary_dim / 2}
+    #   * position_ids: {batch, seq_len} or {} (optional)
+    opts = options!(attrs)
+    interleaved = (opts["interleaved"] || 0) == 1
+    rotary_embedding_dim = opts["rotary_embedding_dim"] || 0
+    num_heads = opts["num_heads"] || 0
+
+    {input_name, cos_name, sin_name, position_name} =
+      case inputs do
+        [i, c, s] -> {i, c, s, nil}
+        [i, c, s, p] -> {i, c, s, (p != "" && p) || nil}
+      end
+
+    input = input!(input_name, axon, params, used_params)
+    cos_cache = input!(cos_name, axon, params, used_params)
+    sin_cache = input!(sin_name, axon, params, used_params)
+
+    position_ids =
+      if position_name do
+        input!(position_name, axon, params, used_params)
+      end
+
+    fun =
+      case position_ids do
+        nil ->
+          fn x, cos_c, sin_c, _opts ->
+            do_rotary_embedding(x, cos_c, sin_c, nil,
+              interleaved: interleaved,
+              rotary_dim: rotary_embedding_dim,
+              num_heads: num_heads
+            )
+          end
+
+        _ ->
+          fn x, cos_c, sin_c, pos, _opts ->
+            do_rotary_embedding(x, cos_c, sin_c, pos,
+              interleaved: interleaved,
+              rotary_dim: rotary_embedding_dim,
+              num_heads: num_heads
+            )
+          end
+      end
+
+    layer_inputs =
+      [input, cos_cache, sin_cache] ++ (if position_ids, do: [position_ids], else: [])
+
+    layer = Axon.layer(fun, layer_inputs, name: output_name, op_name: :rotary_embedding)
 
     {Map.put(axon, output_name, layer), params, used_params}
   end

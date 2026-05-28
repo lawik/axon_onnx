@@ -7,22 +7,22 @@ Total cases: **1793**
 
 | Classification | Count | % of total |
 |---|---|---|
-| passing | 1114 | 62.1% |
-| unsupported | 676 | 37.7% |
+| passing | 1159 | 64.6% |
+| unsupported | 631 | 35.2% |
 | known_bug | 3 | 0.2% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
 
 ## Round-trip coverage
 
-Of the 1114 cases that import cleanly, how many also export back to
+Of the 1159 cases that import cleanly, how many also export back to
 ONNX and re-import with matching predictions (the full bidirectional
 Nx/Axon ⇄ ONNX path).
 
 | Classification | Count | % of import-passing |
 |---|---|---|
-| passing | 544 | 48.8% |
-| unsupported | 570 | 51.2% |
+| passing | 544 | 46.9% |
+| unsupported | 615 | 53.1% |
 | known_bug | 0 | 0.0% |
 | newly_passing | 0 | 0.0% |
 | regression | 0 | 0.0% |
@@ -32,8 +32,8 @@ Nx/Axon ⇄ ONNX path).
 
 **node** — 1653 cases
 
-- passing: 1004
-- unsupported: 646
+- passing: 1049
+- unsupported: 601
 - known_bug: 3
 
 **pytorch-converted** — 82 cases
@@ -63,9 +63,9 @@ A case using N distinct ops contributes to N rows.
 | Acosh | 2 | 2 | 0 | 0 | 0 | 0 |
 | Adagrad | 2 | 0 | 2 | 0 | 0 | 0 |
 | Adam | 2 | 0 | 2 | 0 | 0 | 0 |
-| Add | 175 | 100 | 75 | 0 | 0 | 0 |
+| Add | 175 | 114 | 61 | 0 | 0 | 0 |
 | AffineGrid | 4 | 0 | 4 | 0 | 0 | 0 |
-| And | 70 | 32 | 38 | 0 | 0 | 0 |
+| And | 70 | 46 | 24 | 0 | 0 | 0 |
 | ArgMax | 16 | 16 | 0 | 0 | 0 | 0 |
 | ArgMin | 16 | 16 | 0 | 0 | 0 | 0 |
 | ArrayFeatureExtractor | 1 | 0 | 1 | 0 | 0 | 0 |
@@ -84,7 +84,7 @@ A case using N distinct ops contributes to N rows.
 | BitwiseOr | 4 | 4 | 0 | 0 | 0 | 0 |
 | BitwiseXor | 4 | 4 | 0 | 0 | 0 | 0 |
 | BlackmanWindow | 2 | 0 | 2 | 0 | 0 | 0 |
-| Cast | 284 | 112 | 172 | 0 | 0 | 0 |
+| Cast | 284 | 126 | 158 | 0 | 0 | 0 |
 | CastLike | 108 | 45 | 63 | 0 | 0 | 0 |
 | Ceil | 4 | 2 | 2 | 0 | 0 | 0 |
 | Celu | 1 | 1 | 0 | 0 | 0 | 0 |
@@ -92,10 +92,10 @@ A case using N distinct ops contributes to N rows.
 | Clip | 16 | 10 | 6 | 0 | 0 | 0 |
 | Col2Im | 5 | 0 | 5 | 0 | 0 | 0 |
 | Compress | 4 | 4 | 0 | 0 | 0 | 0 |
-| Concat | 133 | 66 | 67 | 0 | 0 | 0 |
+| Concat | 133 | 80 | 53 | 0 | 0 | 0 |
 | ConcatFromSequence | 2 | 0 | 2 | 0 | 0 | 0 |
-| Constant | 274 | 161 | 113 | 0 | 0 | 0 |
-| ConstantOfShape | 72 | 28 | 44 | 0 | 0 | 0 |
+| Constant | 274 | 175 | 99 | 0 | 0 | 0 |
+| ConstantOfShape | 72 | 42 | 30 | 0 | 0 | 0 |
 | Conv | 33 | 32 | 1 | 0 | 0 | 0 |
 | ConvInteger | 2 | 1 | 0 | 1 | 0 | 0 |
 | ConvTranspose | 14 | 4 | 9 | 1 | 0 | 0 |
@@ -107,20 +107,20 @@ A case using N distinct ops contributes to N rows.
 | DepthToSpace | 2 | 2 | 0 | 0 | 0 | 0 |
 | DequantizeLinear | 14 | 4 | 10 | 0 | 0 | 0 |
 | Det | 2 | 0 | 2 | 0 | 0 | 0 |
-| Div | 184 | 113 | 71 | 0 | 0 | 0 |
+| Div | 184 | 127 | 57 | 0 | 0 | 0 |
 | Dropout | 12 | 3 | 9 | 0 | 0 | 0 |
 | DynamicQuantizeLinear | 3 | 3 | 0 | 0 | 0 | 0 |
-| Einsum | 6 | 0 | 6 | 0 | 0 | 0 |
+| Einsum | 6 | 6 | 0 | 0 | 0 | 0 |
 | Elu | 5 | 5 | 0 | 0 | 0 | 0 |
-| Equal | 99 | 55 | 44 | 0 | 0 | 0 |
+| Equal | 99 | 69 | 30 | 0 | 0 | 0 |
 | Erf | 3 | 3 | 0 | 0 | 0 | 0 |
 | Exp | 49 | 48 | 1 | 0 | 0 | 0 |
-| Expand | 68 | 30 | 38 | 0 | 0 | 0 |
+| Expand | 68 | 44 | 24 | 0 | 0 | 0 |
 | EyeLike | 3 | 3 | 0 | 0 | 0 | 0 |
 | Flatten | 49 | 37 | 12 | 0 | 0 | 0 |
 | Floor | 2 | 2 | 0 | 0 | 0 | 0 |
 | GRU | 4 | 0 | 4 | 0 | 0 | 0 |
-| Gather | 33 | 20 | 13 | 0 | 0 | 0 |
+| Gather | 33 | 23 | 10 | 0 | 0 | 0 |
 | GatherElements | 21 | 21 | 0 | 0 | 0 | 0 |
 | GatherND | 3 | 2 | 1 | 0 | 0 | 0 |
 | Gelu | 4 | 4 | 0 | 0 | 0 | 0 |
@@ -137,7 +137,7 @@ A case using N distinct ops contributes to N rows.
 | HardSigmoid | 4 | 4 | 0 | 0 | 0 | 0 |
 | HardSwish | 1 | 1 | 0 | 0 | 0 | 0 |
 | Hardmax | 7 | 7 | 0 | 0 | 0 | 0 |
-| Identity | 102 | 40 | 62 | 0 | 0 | 0 |
+| Identity | 102 | 54 | 48 | 0 | 0 | 0 |
 | If | 7 | 1 | 6 | 0 | 0 | 0 |
 | ImageDecoder | 9 | 0 | 9 | 0 | 0 | 0 |
 | InstanceNormalization | 3 | 2 | 1 | 0 | 0 | 0 |
@@ -148,14 +148,14 @@ A case using N distinct ops contributes to N rows.
 | LabelEncoder | 4 | 0 | 4 | 0 | 0 | 0 |
 | LayerNormalization | 19 | 19 | 0 | 0 | 0 | 0 |
 | LeakyRelu | 5 | 5 | 0 | 0 | 0 | 0 |
-| Less | 53 | 46 | 7 | 0 | 0 | 0 |
+| Less | 53 | 49 | 4 | 0 | 0 | 0 |
 | LessOrEqual | 8 | 8 | 0 | 0 | 0 | 0 |
 | Log | 32 | 30 | 2 | 0 | 0 | 0 |
 | LogSoftmax | 44 | 10 | 34 | 0 | 0 | 0 |
 | Loop | 11 | 0 | 11 | 0 | 0 | 0 |
 | LpNormalization | 6 | 6 | 0 | 0 | 0 | 0 |
 | LpPool | 8 | 6 | 2 | 0 | 0 | 0 |
-| MatMul | 74 | 29 | 45 | 0 | 0 | 0 |
+| MatMul | 74 | 43 | 31 | 0 | 0 | 0 |
 | MatMulInteger | 1 | 1 | 0 | 0 | 0 | 0 |
 | Max | 28 | 22 | 6 | 0 | 0 | 0 |
 | MaxPool | 28 | 25 | 3 | 0 | 0 | 0 |
@@ -165,15 +165,15 @@ A case using N distinct ops contributes to N rows.
 | MelWeightMatrix | 1 | 0 | 1 | 0 | 0 | 0 |
 | Min | 21 | 21 | 0 | 0 | 0 | 0 |
 | Mish | 1 | 1 | 0 | 0 | 0 | 0 |
-| Mod | 75 | 37 | 38 | 0 | 0 | 0 |
+| Mod | 75 | 51 | 24 | 0 | 0 | 0 |
 | Momentum | 3 | 0 | 3 | 0 | 0 | 0 |
-| Mul | 207 | 137 | 70 | 0 | 0 | 0 |
+| Mul | 207 | 151 | 56 | 0 | 0 | 0 |
 | Neg | 46 | 40 | 6 | 0 | 0 | 0 |
 | NegativeLogLikelihoodLoss | 52 | 18 | 34 | 0 | 0 | 0 |
 | NonMaxSuppression | 9 | 0 | 9 | 0 | 0 | 0 |
 | NonZero | 1 | 1 | 0 | 0 | 0 | 0 |
-| Not | 65 | 27 | 38 | 0 | 0 | 0 |
-| OneHot | 4 | 0 | 4 | 0 | 0 | 0 |
+| Not | 65 | 41 | 24 | 0 | 0 | 0 |
+| OneHot | 4 | 4 | 0 | 0 | 0 | 0 |
 | OptionalGetElement | 4 | 0 | 4 | 0 | 0 | 0 |
 | OptionalHasElement | 7 | 0 | 7 | 0 | 0 | 0 |
 | Or | 24 | 24 | 0 | 0 | 0 | 0 |
@@ -186,7 +186,7 @@ A case using N distinct ops contributes to N rows.
 | RMSNormalization | 19 | 19 | 0 | 0 | 0 | 0 |
 | RNN | 4 | 0 | 4 | 0 | 0 | 0 |
 | RandomUniformLike | 3 | 0 | 3 | 0 | 0 | 0 |
-| Range | 42 | 25 | 17 | 0 | 0 | 0 |
+| Range | 42 | 28 | 14 | 0 | 0 | 0 |
 | Reciprocal | 40 | 28 | 12 | 0 | 0 | 0 |
 | ReduceL1 | 9 | 8 | 1 | 0 | 0 | 0 |
 | ReduceL2 | 9 | 8 | 1 | 0 | 0 | 0 |
@@ -200,8 +200,8 @@ A case using N distinct ops contributes to N rows.
 | ReduceSumSquare | 9 | 8 | 1 | 0 | 0 | 0 |
 | RegexFullMatch | 3 | 0 | 3 | 0 | 0 | 0 |
 | Relu | 5 | 3 | 2 | 0 | 0 | 0 |
-| Reshape | 160 | 64 | 96 | 0 | 0 | 0 |
-| Resize | 39 | 0 | 39 | 0 | 0 | 0 |
+| Reshape | 160 | 78 | 82 | 0 | 0 | 0 |
+| Resize | 39 | 21 | 18 | 0 | 0 | 0 |
 | ReverseSequence | 2 | 2 | 0 | 0 | 0 | 0 |
 | RoiAlign | 3 | 0 | 3 | 0 | 0 | 0 |
 | RotaryEmbedding | 8 | 0 | 8 | 0 | 0 | 0 |
@@ -219,7 +219,7 @@ A case using N distinct ops contributes to N rows.
 | SequenceInsert | 4 | 0 | 4 | 0 | 0 | 0 |
 | SequenceLength | 8 | 0 | 8 | 0 | 0 | 0 |
 | SequenceMap | 6 | 0 | 6 | 0 | 0 | 0 |
-| Shape | 180 | 82 | 98 | 0 | 0 | 0 |
+| Shape | 180 | 96 | 84 | 0 | 0 | 0 |
 | Shrink | 3 | 3 | 0 | 0 | 0 | 0 |
 | Sigmoid | 8 | 8 | 0 | 0 | 0 | 0 |
 | Sign | 2 | 2 | 0 | 0 | 0 | 0 |
@@ -227,15 +227,15 @@ A case using N distinct ops contributes to N rows.
 | Sinh | 2 | 2 | 0 | 0 | 0 | 0 |
 | Size | 63 | 47 | 16 | 0 | 0 | 0 |
 | Slice | 83 | 54 | 29 | 0 | 0 | 0 |
-| Softmax | 73 | 35 | 38 | 0 | 0 | 0 |
+| Softmax | 73 | 49 | 24 | 0 | 0 | 0 |
 | SoftmaxCrossEntropyLoss | 34 | 34 | 0 | 0 | 0 | 0 |
 | Softplus | 4 | 4 | 0 | 0 | 0 | 0 |
 | Softsign | 2 | 2 | 0 | 0 | 0 | 0 |
 | SpaceToDepth | 2 | 2 | 0 | 0 | 0 | 0 |
 | Split | 27 | 20 | 7 | 0 | 0 | 0 |
 | SplitToSequence | 6 | 0 | 6 | 0 | 0 | 0 |
-| Sqrt | 139 | 86 | 53 | 0 | 0 | 0 |
-| Squeeze | 34 | 26 | 8 | 0 | 0 | 0 |
+| Sqrt | 139 | 100 | 39 | 0 | 0 | 0 |
+| Squeeze | 34 | 29 | 5 | 0 | 0 | 0 |
 | StringConcat | 5 | 0 | 5 | 0 | 0 | 0 |
 | StringNormalizer | 12 | 0 | 12 | 0 | 0 | 0 |
 | StringSplit | 6 | 0 | 6 | 0 | 0 | 0 |
@@ -243,19 +243,19 @@ A case using N distinct ops contributes to N rows.
 | Sum | 8 | 8 | 0 | 0 | 0 | 0 |
 | Swish | 1 | 1 | 0 | 0 | 0 | 0 |
 | Tan | 2 | 2 | 0 | 0 | 0 | 0 |
-| Tanh | 16 | 9 | 7 | 0 | 0 | 0 |
+| Tanh | 16 | 12 | 4 | 0 | 0 | 0 |
 | TensorScatter | 3 | 0 | 3 | 0 | 0 | 0 |
 | TfIdfVectorizer | 7 | 0 | 7 | 0 | 0 | 0 |
 | ThresholdedRelu | 3 | 3 | 0 | 0 | 0 | 0 |
 | Tile | 4 | 4 | 0 | 0 | 0 | 0 |
 | TopK | 7 | 7 | 0 | 0 | 0 | 0 |
-| Transpose | 117 | 37 | 80 | 0 | 0 | 0 |
+| Transpose | 117 | 51 | 66 | 0 | 0 | 0 |
 | TreeEnsemble | 2 | 0 | 2 | 0 | 0 | 0 |
 | Trilu | 18 | 16 | 2 | 0 | 0 | 0 |
 | Unique | 6 | 3 | 3 | 0 | 0 | 0 |
-| Unsqueeze | 101 | 53 | 48 | 0 | 0 | 0 |
+| Unsqueeze | 101 | 67 | 34 | 0 | 0 | 0 |
 | Upsample | 1 | 0 | 1 | 0 | 0 | 0 |
-| Where | 97 | 59 | 38 | 0 | 0 | 0 |
+| Where | 97 | 73 | 24 | 0 | 0 | 0 |
 | Xor | 8 | 8 | 0 | 0 | 0 | 0 |
 
 
